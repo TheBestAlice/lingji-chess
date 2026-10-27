@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>灵基演算 测试版</title>
 <style>
-/* 版式：沿用自走棋通行的桌面布局——左侧御主列表；中间自上而下是召唤阵操作、商店、战线、御主栏、备战席。窄屏时御主列表移到顶部。
+/* 版式：沿用自走棋通行的桌面布局——左侧御主列表；中间自上而下是召唤阵操作、商店、战线、御主栏、手牌（买下的从者和礼装）。窄屏时御主列表移到顶部。
    素材在 assets/；特效是纯黑底图，放在桌面这一层用滤色混合 */
 :root {
   --bg: #0b1020; --panel: #121a33e6; --panel2: #18223f; --line: #2a3760;
@@ -15,6 +15,9 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
+.tip { position: fixed; z-index: 50; max-width: 300px; padding: 8px 10px; border: 1px solid var(--gold); border-radius: 8px; background: #0d1428f2; color: var(--text); font-size: 12px; line-height: 1.55; pointer-events: none; display: none; box-shadow: 0 4px 14px #000a; }
+.tip.on { display: block; }
+.tip > div { margin-top: 3px; }
 html, body { margin: 0; color: var(--text); font: 14px/1.5 "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
 body { background: var(--bg); padding: env(safe-area-inset-top, 0) max(8px, env(safe-area-inset-right, 0px)) 16px max(8px, env(safe-area-inset-left, 0px)); }
 body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: linear-gradient(#1a2440a0, #141c34c8), url(assets/bg/训练场_竖.webp) center / cover no-repeat; filter: saturate(.75); }
@@ -82,7 +85,7 @@ h1 { font-size: 26px; margin: 0; letter-spacing: .08em; }
 .line { display: flex; justify-content: center; gap: 8px; flex-wrap: nowrap; }
 .line > * { width: var(--piece); flex: 0 0 var(--piece); }
 .benchline > * { width: calc(var(--piece) * .78); flex-basis: calc(var(--piece) * .78); }
-.hud { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 10px; align-items: center; }
+.hud { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; }
 .master { display: flex; align-items: center; gap: 8px; }
 .master .face { position: relative; width: 70px; height: 70px; border-radius: 50%; border: 3px solid var(--gold); background: #0b1020 center / 80% no-repeat; box-shadow: 0 0 12px #d9b35b55; }
 .master .hpd { position: absolute; bottom: -6px; right: -6px; min-width: 30px; height: 30px; border-radius: 15px; background: radial-gradient(#d24a3a, #7a1a12); border: 2px solid #f0c08a; display: grid; place-items: center; font-weight: 900; font-size: 13px; padding: 0 4px; }
@@ -157,17 +160,13 @@ h1 { font-size: 26px; margin: 0; letter-spacing: .08em; }
 .cost { position: absolute; top: -6px; right: -4px; font-size: 10px; background: var(--gold); color: #1a1405; border-radius: 6px; padding: 0 4px; font-weight: 800; z-index: 3; }
 /* 概念礼装卡：fgo.wiki 的礼装图标 + 礼装格底框 */
 .cecard { position: relative; aspect-ratio: 1 / 1.22; cursor: grab; min-width: 0; touch-action: none; user-select: none; -webkit-user-select: none; }
-.cecard .sq { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: #2a1f45; box-shadow: 0 0 0 2px #b48cff, 0 0 10px #b48cff66; }
+/* 礼装方框缩到 88%、上下各留 6%：和从者框图的可见边框一样大，总高度不变 */
+.cecard .sq { position: relative; aspect-ratio: 1; width: 88%; margin: 6% auto; border-radius: 8px; overflow: hidden; background: #2a1f45; box-shadow: 0 0 0 2px #b48cff, 0 0 10px #b48cff66; }
 .cecard .sq img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
 .cecard .tier { position: absolute; top: 2px; left: 2px; font-size: 9px; font-weight: 800; padding: 0 4px; border-radius: 4px; background: #0b1020cc; color: #d8c4ff; }
 .cecard .nm { margin-top: 2px; font-size: 10px; line-height: 13px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 700; color: #e4d6ff; text-shadow: 0 1px 2px #000; }
 .cecard.sel .sq { outline: 2px solid var(--cyan); outline-offset: 2px; }
 .cecard.dragging { opacity: .25; }
-.cehand { display: flex; gap: 6px; align-items: center; }
-.cehand .zl2 { font-size: 11px; color: var(--faint); writing-mode: vertical-rl; }
-.cehand .slotc { width: calc(var(--piece) * .62); aspect-ratio: 1 / 1.22; border: 1px dashed #8a6ccf88; border-radius: 8px; }
-.cehand .cecard { width: calc(var(--piece) * .62); }
-.zone.cehand-zone { min-height: 0; padding: 6px; border-radius: 10px; }
 .piece.aim .sq { outline: 3px solid #b48cff; outline-offset: 2px; border-radius: 8px; box-shadow: 0 0 14px #b48cff; }
 .piece.fuse .sq { outline: 3px solid #9fd0ff; outline-offset: 2px; border-radius: 8px; box-shadow: 0 0 14px #9fd0ff; }
 /* 主持人 */
@@ -341,7 +340,7 @@ function pieceHTML(u, opts = {}) {
   if (u.stun) marks.push('眩晕');
   const cls = ['piece', hp <= 0 ? 'dim' : '', opts.cls || ''].join(' ');
   const name = u.summon ? u.name : u.key;
-  return `<div class="${cls}" data-uid="${u.uid}" ${opts.attr || ''} title="${esc(name)}">
+  return `<div class="${cls}" data-uid="${u.uid}" data-key="${esc(u.summon ? '' : u.key || '')}" data-sname="${esc(u.summon ? u.name : '')}" ${opts.attr || ''}>
     <div class="sq">
       <div class="art ${u.summon ? 'holo' : ''}">${img ? `<img src="${img}" alt="" loading="lazy" draggable="false" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ph',textContent:'${esc(name).slice(0, 4)}'}))">` : `<div class="ph">${esc(name)}</div>`}</div>
       <img class="frm" src="${A}ui/框_${t}.webp" alt="" draggable="false">
@@ -364,7 +363,7 @@ const CEDATA = Object.fromEntries((C.DATA.ces || []).map(c => [c.n, c]));
 function ceCardHTML(name, opts = {}) {
   const ce = CEDATA[name];
   if (!ce) return '';
-  return `<div class="cecard ${opts.cls || ''}" ${opts.attr || ''} title="${esc(ce.n)}：${esc(ce.fx)}">
+  return `<div class="cecard ${opts.cls || ''}" ${opts.attr || ''} data-tipce="${esc(ce.n)}">
     <div class="sq"><img src="${ce.img}" alt="" draggable="false" referrerpolicy="no-referrer" onerror="this.style.display='none'"><span class="tier">${ce.t} 阶</span></div>
     ${opts.cost !== undefined ? `<span class="cost">${opts.cost}</span>` : ''}
     <div class="nm">${esc(ce.n)}</div>
@@ -504,6 +503,8 @@ const STAFF = ['格林', '芊芊', '藤丸立香'];
 const avatarOf = p => (p.human ? `${A}master/${(C.SKILLS.find(s => s.n === p.skill) || {}).suit || '迦勒底制服'}.png` : STAFF.includes(p.name) ? `${A}master/${p.name}.jpg` : CARD[p.name] ? CARD[p.name].img : `${A}master/格林.jpg`);
 
 // ---------- 开始页 ----------
+// 对手强度：对手 AI 按这个概率不挑最优（见 core.js 的 AI_EASE）
+const EASE_LEVELS = [['轻松：对手经常失误', 0.6], ['普通', 0.45], ['认真：对手很少失误', 0.2]];
 // 酒馆里：契约英灵直接取自变量，好感高的 3 名进卡池；卡表里的契约英灵也可能坐到对面
 function pactHTML() {
   const inPool = PACT.filter(p => p.key).slice(0, 3);
@@ -525,6 +526,8 @@ function renderStart() {
       <label><input type="checkbox" id="aff"> 契约英灵好感 ≥ 60（买下就解锁宝具）</label>`}
       <label>主持人（解锁后可选；只负责演出）　<input type="checkbox" id="hostOn" ${hostState.on ? 'checked' : ''}> 显示主持人</label>
       <div class="hostpick">${HOSTS.map(x => `<label class="${unlocked(x.id) ? '' : 'locked'}" title="${esc(x.unlock)}"><input type="radio" name="host" value="${x.id}" ${unlocked(x.id) ? '' : 'disabled'} ${curHost() === x ? 'checked' : ''}><img src="${hostImg(x)}" alt="" referrerpolicy="no-referrer"><span>${esc(x.name)}<br><small class="muted">${unlocked(x.id) ? '已解锁' : esc(x.unlock)}</small></span></label>`).join('')}</div>
+      <label for="ease">对手强度</label>
+      <select id="ease">${EASE_LEVELS.map(([n, v]) => `<option value="${v}"${store.get('ease', 0.45) === v ? ' selected' : ''}>${n}</option>`).join('')}</select>
       <label for="seed">种子（留空随机；同一种子可以复现同一局）</label>
       <input type="number" id="seed" placeholder="随机">
       <div class="row" style="margin-top:12px"><button class="img primary" data-act="start">开始演算</button><button data-act="rules">规则速览</button>${volHTML()}</div>
@@ -536,15 +539,16 @@ function rulesModal() {
     <h3>规则速览</h3>
     <ul class="rules">
       <li>6 人一局，每局开放 5 个种族。每回合魔力 = 回合数 + 2（上限 10），能力给的魔力每回合最多再 +6、可以超过 10。召唤 3、送还返还 1（能力最多改到 3）、刷新 1、固定免费。</li>
-      <li>拖动：商店 → 战线或备战席是召唤；战线里左右拖是换位；拖回商店是送还。上了战线就不能退回备战席。点一下棋子看详情。</li>
-      <li>概念礼装（紫框）：商店里 1–2 格，拖到从者身上当场使用；不用指定目标的拖到战线上；拖进礼装栏（3 格）可以留着以后用。</li>
+      <li>手牌：买下的从者和礼装都放在下面的手牌里，共 10 格。从商店往下拖进手牌就是买下；从者也可以直接拖到战线上（买下并上阵）。</li>
+      <li>拖动：手牌里的从者拖到战线是上阵；战线里左右拖是换位；拖回商店是送还。上了战线就不能退回手牌。点一下棋子看详情。</li>
+      <li>概念礼装（紫框）：商店里 1–2 格，必须先拖进手牌买下；用的时候从手牌拖到从者身上，不用指定目标的拖到战线上。</li>
       <li>【灵基融合】的机械：直接拖到战线上另一名机械的正中间，合并攻体，不占格子，次数不限。</li>
       <li>【同貌】：三名同阶、不全同名的 Saber脸 也能合成金卡，由你选做成哪一名，没有圣杯。【吞噬】吃掉商店里的从者长攻体；【吸收】击杀后长攻体。</li>
       <li>升级召唤阵能刷出更高阶的从者，每过一个回合升级费用便宜 1。</li>
       <li>战线 7 格，从左到右轮流出手，攻击随机敌人，有目标集中的优先被打；攻击方和被攻击方互相造成伤害。</li>
-      <li>同名 3 张自动合成金卡：攻体翻倍，1–3 阶解锁宝具、4–6 阶宝具强化，并从比召唤阵等级高一阶的从者里选一张。</li>
+      <li>同名 3 张自动合成金卡，回到手牌：攻体翻倍、固有能力效果翻倍，1–3 阶解锁宝具、4–6 阶宝具强化。把金卡放上战线时得到三合一奖励：从比召唤阵等级高一阶的从者里选一张。</li>
       <li>右上角的锁是宝具状态：灰=未解锁、蓝=可以发动、暗金=本场已发动。</li>
-      <li>职阶羁绊 2/4/6 名、种族羁绊 2/4 名；本局开放 5 个种族。</li>
+      <li>职阶羁绊、种族羁绊都是 2/4/6 名，同名的从者只算一名；本局开放 5 个种族。鼠标停在棋子、礼装、羁绊和御主上可以看说明。</li>
       <li>令咒 3 划：立刻召唤（免费买一张）、灵基升华（第 4 回合起）、绝对命令（本回合输了不扣血）。</li>
       <li>输了扣「对方存活从者阶数之和 + 对方召唤阵等级」，前 4 回合最多 5、5–7 回合最多 10、之后最多 15。</li>
       <li>青色全息的是召唤物：训练场演算出来的投影，不是从者。</li>
@@ -558,7 +562,7 @@ function rulesModal() {
 
 // ---------- 桌面：准备阶段 ----------
 function playersHTML(nextId) {
-  return `<aside class="players framed">${G.players.map(p => `<div class="pl ${p.human ? 'me' : ''} ${p.id === nextId ? 'next' : ''} ${p.alive ? '' : 'out'}" title="${esc(p.name)}">
+  return `<aside class="players framed">${G.players.map(p => `<div class="pl ${p.human ? 'me' : ''} ${p.id === nextId ? 'next' : ''} ${p.alive ? '' : 'out'}" data-pid="${p.id}">
       ${p.id === nextId ? '<span class="tag">对手</span>' : ''}
       <div class="av"><img src="${avatarOf(p)}" alt="" referrerpolicy="no-referrer"></div>
       <div class="pn">${esc(p.human ? '你' : p.name.length > 5 ? p.name.slice(0, 5) + '…' : p.name)}</div>
@@ -566,19 +570,24 @@ function playersHTML(nextId) {
       <div class="hpb"><i style="width:${Math.max(0, p.hp) / 30 * 100}%"></i></div>
     </div>`).join('')}</aside>`;
 }
+// 种族羁绊的档位：默认 2 / 4 / 6 名；种族数据里写了 steps（如 [3, 5, 7] 或 [4]）时按它
+const tribeSteps = t => (C.DATA.tribes[t] && C.DATA.tribes[t].steps) || [2, 4, 6];
+const tribeTexts = t => { const tb = C.DATA.tribes[t] || {}; return tb.texts || [tb.b2, tb.b4, tb.b6]; };
 function bondsHTML() {
   const cls = {}, out = [];
-  P.board.forEach(u => { cls[u.c] = (cls[u.c] || 0) + 1; });
+  // 同名的从者只算一名
+  P.board.forEach(u => { (cls[u.c] = cls[u.c] || new Set()).add(u.key); });
   C.BASE.forEach(c => {
-    const n = cls[c] || 0; if (!n) return;
+    const n = cls[c] ? cls[c].size : 0; if (!n) return;
     const lv = [2, 4, 6].filter(x => n >= x).pop();
-    out.push(`<span class="bond ${lv ? 'lv' : ''}">${c} ${n}<small>/${[2, 4, 6].find(x => n < x) || 6}</small></span>`);
+    out.push(`<span class="bond ${lv ? 'lv' : ''}" data-bond="${c}" data-n="${n}">${c} ${n}<small>/${[2, 4, 6].find(x => n < x) || 6}</small></span>`);
   });
   const extra = new Set(P.board.filter(u => !C.BASE.includes(u.c)).map(u => u.c)).size;
-  if (extra) out.push(`<span class="bond ${extra >= 3 ? 'lv' : ''}">额外职阶 ${extra}种<small>/${extra >= 3 ? 5 : 3}</small></span>`);
+  if (extra) out.push(`<span class="bond ${extra >= 3 ? 'lv' : ''}" data-bond="额外职阶" data-n="${extra}">额外职阶 ${extra}种<small>/${extra >= 3 ? 5 : 3}</small></span>`);
   G.open.forEach(t => {
     const n = C.countTribe(G, P.board, t);
-    out.push(`<span class="bond ${n >= 2 ? 'lv' : ''}">${tribeIcon(t)}${t} ${n}<small>/${n >= 2 ? 4 : 2}</small></span>`);
+    const steps = tribeSteps(t);
+    out.push(`<span class="bond ${n >= steps[0] ? 'lv' : ''}" data-bond="${t}" data-n="${n}">${tribeIcon(t)}${t} ${n}<small>/${steps.find(x => n < x) || steps[steps.length - 1]}</small></span>`);
   });
   return out.join('');
 }
@@ -589,14 +598,14 @@ function ceDetailHTML() {
   const ce = CEDATA[name];
   if (!ce) return '';
   const cost = C.ceCost(P, name);
-  const acts = ce.target
-    ? `<p class="muted">把它拖到一名从者身上使用${fromShop ? `（${cost} 魔力）` : ''}。</p>`
-    : `<button class="img primary" data-act="useCE">${fromShop ? `使用（${cost} 魔力）` : '使用'}</button>`;
+  const acts = fromShop
+    ? `<p class="muted">拖进手牌买下，之后再从手牌拖到${ce.target ? '一名从者身上' : '战线上'}使用。</p><button class="img primary" data-act="storeCE" ${C.handFree(P) <= 0 ? 'disabled' : ''}>买进手牌（${cost} 魔力）</button>`
+    : ce.target ? '<p class="muted">把它拖到一名从者身上使用。</p>' : '<button class="img primary" data-act="useCE">使用</button>';
   return `<div class="detail">
     <button class="x" data-act="closeSel" aria-label="关闭">×</button>
-    <h3>${esc(ce.n)} <span class="chip">${ce.t} 阶</span>${fromShop ? ` <span class="chip gold">${cost} 魔力</span>` : ' <span class="chip">礼装栏</span>'}</h3>
+    <h3>${esc(ce.n)} <span class="chip">${ce.t} 阶</span>${fromShop ? ` <span class="chip gold">${cost} 魔力</span>` : ' <span class="chip">手牌</span>'}</h3>
     <div class="row" style="align-items:flex-start;flex-wrap:nowrap"><img src="${ce.img}" alt="" style="width:66px;border-radius:8px" referrerpolicy="no-referrer"><p style="margin:0">${esc(ce.fx)}</p></div>
-    <div class="row" style="margin-top:6px">${acts}${fromShop ? `<button data-act="storeCE" ${P.ceHand.length >= C.CE_HAND ? 'disabled' : ''}>放进礼装栏</button>` : ''}</div>
+    <div class="row" style="margin-top:6px">${acts}</div>
   </div>`;
 }
 function detailHTML() {
@@ -620,7 +629,8 @@ function detailHTML() {
     <h3>${esc(key)}${u && u.gold ? ' <span class="chip gold">金卡</span>' : ''}</h3>
     <div class="row"><span class="chip">${c.c}</span><span class="chip">${c.t} 阶</span>${tribes.map(t => `<span class="chip ${G.open.includes(t) ? 'cyan' : ''}">${tribeIcon(t)}${esc(t)}</span>`).join('')}${(c.traits || []).map(t => `<span class="chip">〔${esc(t)}〕</span>`).join('')}<span class="chip">${esc(c.role)}</span></div>
     <p><span class="lbl">攻/体</span>${u ? `${C.unitAtk(u)}/${C.unitHp(u)}` : `${c.atk}/${c.hp}`}${u && (u.permAtk || u.permHp) ? `<span class="muted">（永久成长 +${u.permAtk}/+${u.permHp}）</span>` : ''}</p>
-    <p><span class="lbl">固有能力</span>${kwText(c.ab)}</p>
+    <p><span class="lbl">固有能力</span>${kwText(c.ab)}${u && u.gold && C.goldDoubles(u) ? ' <span class="chip gold">金卡：效果翻倍</span>' : ''}</p>
+    ${u && u.tripleReward ? '<p class="muted">放上战线时获得三合一奖励：从比召唤阵等级高一阶的从者里选一名。</p>' : ''}
     <p><span class="lbl">宝具『${esc(c.npName || '')}』</span>${kwText(npLine)}${u ? (C.npUnlocked(u) ? ' <span class="chip gold">已解锁</span>' : ' <span class="chip">未解锁</span>') : ''}</p>
     ${acts}
   </div>`;
@@ -629,9 +639,11 @@ function renderPrep() {
   const nextId = C.opponentOf(G, 0);
   const shop = P.shop.map((k, i) => (k ? pieceHTML({ uid: 'shop' + i, key: k, t: CARD[k].t, atk: CARD[k].atk, hp: CARD[k].hp, contract: P.contracts.includes(k) }, { cls: sel && sel.shop === i ? 'sel' : '', attr: `data-shop="${i}" data-drag="shop:${i}"`, cost: C.buyCost(P) }) : '')).filter(Boolean).join('');
   const ceHTML = P.ceShop.map((n, i) => ceCardHTML(n, { cls: sel && sel.ce === i ? 'sel' : '', attr: `data-ce="${i}" data-drag="ce:${i}"`, cost: C.ceCost(P, n) })).join('');
-  const handHTML = P.ceHand.map((n, i) => ceCardHTML(n, { cls: sel && sel.hand === i ? 'sel' : '', attr: `data-hand="${i}" data-drag="hand:${i}"` })).join('') + Array.from({ length: Math.max(0, C.CE_HAND - P.ceHand.length) }, () => '<div class="slotc"></div>').join('');
   const board = P.board.map(u => pieceHTML(u, { cls: sel && sel.uid === u.uid ? 'sel' : (mode ? 'target' : ''), attr: `data-drag="board:${u.uid}"` })).join('') + Array.from({ length: Math.max(0, 7 - P.board.length) }, () => '<div class="slot"></div>').join('');
-  const bench = P.bench.map(u => pieceHTML(u, { cls: sel && sel.uid === u.uid ? 'sel' : (mode ? 'target' : ''), attr: `data-drag="bench:${u.uid}"` })).join('') + Array.from({ length: Math.max(0, 8 - P.bench.length) }, () => '<div class="slot"></div>').join('');
+  // 手牌：先放从者，再放礼装，剩下的是空格
+  const bench = P.bench.map(u => pieceHTML(u, { cls: sel && sel.uid === u.uid ? 'sel' : (mode ? 'target' : ''), attr: `data-drag="bench:${u.uid}"` })).join('')
+    + P.ceHand.map((n, i) => ceCardHTML(n, { cls: sel && sel.hand === i ? 'sel' : '', attr: `data-hand="${i}" data-drag="hand:${i}"` })).join('')
+    + Array.from({ length: Math.max(0, C.handFree(P)) }, () => '<div class="slot"></div>').join('');
   const sk = C.SKILLS.find(s => s.n === P.skill);
   $app.innerHTML = `
     <div class="row" style="justify-content:space-between;margin-top:6px"><span class="muted">第 <b style="color:var(--gold)">${G.round}</b> 回合 · 本局种族 ${G.open.map(t => `<span class="chip cyan">${tribeIcon(t)}${t}</span>`).join(' ')}</span><span class="row">${volHTML()}<button data-act="rules">规则</button></span></div>
@@ -657,11 +669,10 @@ function renderPrep() {
               <button data-act="absolute" style="margin-top:4px;font-size:11px;padding:2px 6px" ${P.seals && !P.absolute ? '' : 'disabled'} title="本回合输了不扣体力">${P.absolute ? '命令中' : '绝对命令'}</button></div>
           </div>
           <div class="bonds">${bondsHTML()}</div>
-          <div class="zone cehand-zone" data-zone="cehand" title="礼装栏：把商店里的礼装拖进来可以留着以后用"><div class="cehand"><span class="zl2">礼装栏</span>${handHTML}</div></div>
           <div class="mana"><div>魔力 <b style="${P.mana > 10 ? 'color:var(--gold)' : ''}">${P.mana}</b>/10${P.discountBuys ? ` <small class="muted">召唤 -1 ×${P.discountBuys}</small>` : ''}</div><div class="gems">${Array.from({ length: 10 }, (_, i) => `<img src="${A}master/魔力棱镜.png" class="${i < P.mana ? '' : 'off'}" alt="">`).join('')}</div>
             <button class="img primary endbtn" data-act="end" style="margin-top:6px">结束准备</button></div>
         </div>
-        <div class="zone benchzone" data-zone="bench"><span class="zl">备战席</span><div class="line benchline">${bench}</div></div>
+        <div class="zone benchzone" data-zone="bench"><span class="zl" title="从商店拖下来就是买下；从者和礼装共用 ${C.HAND} 格">手牌 ${C.HAND - C.handFree(P)}/${C.HAND}</span><div class="line benchline">${bench}</div></div>
       </section>
     </div>
     ${detailHTML()}
@@ -679,12 +690,83 @@ function sameModal() {
 }
 function discoverModal() {
   return `<div class="modal"><div class="box">
-    <h3>${G.round && P.triples ? '三合一完成：' : ''}从下面选一名从者</h3>
+    <h3>三合一奖励：从下面选一名从者</h3>
+    <p class="muted">从比召唤阵等级高一阶的从者里选，点卡图或下面的说明都可以。</p>
     <div class="disc">${P.pendingDiscover.map((k, i) => `<div data-disc="${i}" style="cursor:pointer">${pieceHTML({ uid: 'd' + i, key: k, t: CARD[k].t, atk: CARD[k].atk, hp: CARD[k].hp })}<div class="muted" style="font-size:12px;margin-top:4px">${esc(CARD[k].ab)}</div></div>`).join('')}</div>
   </div></div>`;
 }
 
-// ---------- 拖动：商店、战线、备战席之间 ----------
+// ---------- 悬停信息（鼠标） ----------
+// 职阶羁绊的说明（与 core.js 的交战结算一致）
+const CLASS_BONDS = {
+  Saber: ['全体 Saber +1/+3', '全体 Saber 获得毅力', '友方第一次受到致命伤害时，由体力最高的 Saber 代为承受（每场一次）'],
+  Archer: ['开战时每名 Archer 对随机敌人造成 2 点伤害', '每发改为 4 点', '开场射击击杀敌人时，这名 Archer 再射一发'],
+  Lancer: ['每名 Lancer 获得一次毅力', '毅力触发后攻击翻倍', '毅力触发时立即反击攻击者'],
+  Rider: ['本方先手', '每名 Rider 第一次攻击后追加攻击一次', '每次击杀后追加攻击（每场最多 3 次）'],
+  Caster: ['开战时友方全体获得等同 Caster 人数的护盾', '最左边一名还没解锁宝具的 Caster 本场解锁宝具', '辅助、治疗类宝具效果 +50%'],
+  Assassin: ['Assassin 获得潜伏', 'Assassin 第一次攻击伤害翻倍', '每次击杀后重新潜伏'],
+  Berserker: ['受伤时攻击 +2，每场最多 +10', '阵亡时对随机敌人造成等同其攻击的伤害', '受伤加攻的上限翻倍，并获得一次毅力'],
+};
+const tipEl = document.createElement('div');
+tipEl.className = 'tip';
+document.body.appendChild(tipEl);
+function tipFor(el) {
+  if (el.dataset.key !== undefined && (el.dataset.key || el.dataset.sname)) {
+    const key = el.dataset.key;
+    if (!key) return `<b>${esc(el.dataset.sname)}</b><div class="muted">召唤物：训练场演算出来的投影，没有能力；计算御主伤害时按 1 阶算。</div>`;
+    const c = CARD[key];
+    if (!c) return '';
+    const uid = el.dataset.uid;
+    const u = G && P ? P.board.concat(P.bench).find(x => String(x.uid) === uid) : null;
+    const gold = u ? u.gold : el.querySelector('.goldf');
+    const tr = KW[c.np.tr] ? `【${c.np.tr}】` : c.np.tr;
+    const np = c.t <= 3 ? `（金卡解锁）${tr}：${c.np.fx}` : `${tr}：${c.np.fx}${c.np.gold ? `；金卡：${c.np.gold}` : ''}`;
+    const stats = el.querySelector('.atk') ? `${el.querySelector('.atk').textContent}/${el.querySelector('.hp').textContent}` : `${c.atk}/${c.hp}`;
+    const marks = [...el.querySelectorAll('.marks i')].map(i => i.textContent);
+    return `<b>${esc(key)}</b>${gold ? ' <span class="chip gold">金卡</span>' : ''}
+      <div class="muted">${c.c} · ${c.t} 阶 · ${(u ? C.tribesOf(G, u) : c.r).join('、') || '中立'} · 攻/体 ${stats}${marks.length ? ` · ${marks.join('、')}` : ''}</div>
+      <div>${kwText(c.ab)}${gold && C.goldDoubles({ gold: true, key }) ? '（金卡：效果翻倍）' : ''}</div>
+      <div class="muted">宝具『${esc(c.npName || '')}』${kwText(np)}</div>
+      ${u && u.tripleReward ? '<div class="muted">放上战线时获得三合一奖励</div>' : ''}`;
+  }
+  if (el.dataset.tipce) { const ce = CEDATA[el.dataset.tipce]; return ce ? `<b>${esc(ce.n)}</b> <span class="muted">${ce.t} 阶</span><div>${esc(ce.fx)}</div>` : ''; }
+  if (el.dataset.bond) {
+    const k = el.dataset.bond, n = Number(el.dataset.n) || 0;
+    const row = (need, text) => `<div class="${n >= need ? '' : 'muted'}">${need} 名：${esc(text)}</div>`;
+    if (CLASS_BONDS[k]) return `<b>${k} 羁绊</b>（同名只算一名）${CLASS_BONDS[k].map((x, i) => row([2, 4, 6][i], x)).join('')}`;
+    if (k === '额外职阶') return `<b>额外职阶</b>（按不同职阶的种数算，Shielder 也算）${row(3, '额外职阶全员 +2/+4')}${row(5, '额外职阶即使没有三合一也能使用宝具')}`;
+    const tb = C.DATA.tribes[k];
+    return tb ? `<b>${esc(k)}</b> <span class="muted">${esc(tb.theme)}（同名只算一名）</span>${tribeSteps(k).map((need, i) => (tribeTexts(k)[i] ? row(need, tribeTexts(k)[i]) : '')).join('')}` : '';
+  }
+  if (el.dataset.pid !== undefined && G) {
+    const p = G.players[Number(el.dataset.pid)];
+    if (!p) return '';
+    const kind = p.human ? '你' : p.rival ? '契约英灵（联机）' : STAFF.includes(p.name) ? '职员（联机）' : `训练场演算的电脑对手 · ${p.style}`;
+    const lr = p.lastResult;
+    return `<b>${esc(p.name)}</b><div class="muted">${kind}</div><div>体力 ${Math.max(0, p.hp)} · 召唤阵 ${p.tier} 级 · 战线 ${p.board.length} 名${p.alive ? '' : ` · 第 ${p.place} 名出局`}</div>${lr ? `<div class="muted">上一场：${lr.win ? '胜' : lr.draw ? '平' : '负'}</div>` : ''}`;
+  }
+  return '';
+}
+let tipTarget = null;
+document.addEventListener('pointerover', e => {
+  if (e.pointerType && e.pointerType !== 'mouse') return;
+  const el = e.target.closest('[data-key],[data-tipce],[data-bond],[data-pid]');
+  if (el === tipTarget) return;
+  tipTarget = el;
+  const html = el && !(typeof drag !== 'undefined' && drag && drag.on) ? tipFor(el) : '';
+  tipEl.innerHTML = html;
+  tipEl.classList.toggle('on', !!html);
+});
+document.addEventListener('pointermove', e => {
+  if (!tipEl.classList.contains('on')) return;
+  const w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+  const x = e.clientX + 16 + w > innerWidth ? e.clientX - 16 - w : e.clientX + 16;
+  const y = e.clientY + 16 + h > innerHeight ? Math.max(4, e.clientY - 16 - h) : e.clientY + 16;
+  tipEl.style.left = `${Math.max(4, x)}px`; tipEl.style.top = `${y}px`;
+});
+document.addEventListener('pointerdown', () => { tipEl.classList.remove('on'); tipTarget = null; });
+
+// ---------- 拖动：商店、战线、手牌之间 ----------
 let drag = null, suppressClick = false;
 document.addEventListener('pointerdown', e => {
   if (!G || replay) return;
@@ -712,9 +794,9 @@ document.addEventListener('pointermove', e => {
   document.querySelectorAll('.piece.aim, .piece.fuse').forEach(n => n.classList.remove('aim', 'fuse'));
   if (!z) return;
   const kind = drag.src.split(':')[0];
-  // 礼装：指着的从者高亮；从商店拖向礼装栏时礼装栏高亮
-  if (kind === 'ce' || kind === 'hand') {
-    if (z.dataset.zone === 'cehand' && kind === 'ce') z.classList.add('drop');
+  // 礼装：商店里的只能拖进手牌（手牌高亮）；手牌里的指着从者时从者高亮
+  if (kind === 'ce') { if (z.dataset.zone === 'bench') z.classList.add('drop'); return; }
+  if (kind === 'hand') {
     const pc = pieceUnder(e.clientX, e.clientY);
     if (pc) pc.classList.add('aim'); else if (z.dataset.zone === 'board' || z.dataset.zone === 'bench') z.classList.add('drop');
     return;
@@ -770,12 +852,12 @@ document.addEventListener('pointerup', e => {
     else if (zone === 'board') {
       if (kind === 'board') result(C.moveTo(G, P, uid, idx), '上阵'); // idx 已经不计被拖的那名
       else deployWithVoice(u, idx);
-    } else if (zone === 'bench' && kind === 'board') { toast('上了战线就不能拿回备战席，只能送还或换位置'); play('错误'); }
+    } else if (zone === 'bench' && kind === 'board') { toast('上了战线就不能拿回手牌，只能送还或换位置'); play('错误'); }
   }
   render();
 });
 document.addEventListener('pointercancel', () => { if (drag && drag.ghost) drag.ghost.remove(); drag = null; render(); });
-// 指针下面的己方从者（战线或备战席）
+// 指针下面的己方从者（战线或手牌）
 function pieceUnder(x, y) {
   const el = document.elementsFromPoint(x, y).find(n => n.matches && n.matches('.boardline .piece[data-uid], .benchline .piece[data-uid]'));
   return el && !el.classList.contains('dragging') ? el : null;
@@ -797,7 +879,13 @@ function dropCE(kind, i, zone, x, y) {
   const name = kind === 'ce' ? P.ceShop[i] : P.ceHand[i];
   const ce = CEDATA[name];
   if (!ce) return;
-  if (kind === 'ce' && zone === 'cehand') { if (result(C.storeCE(G, P, i), '礼装')) sel = null; return; }
+  // 商店里的礼装只能拖进手牌买下
+  if (kind === 'ce') {
+    if (zone === 'bench') { if (result(C.storeCE(G, P, i), '礼装')) sel = null; }
+    else if (zone !== 'shop') { play('错误'); toast('礼装要先拖进手牌才算买下'); }
+    return;
+  }
+  if (zone === 'bench') return;
   const pc = pieceUnder(x, y);
   let r;
   if (ce.target) {
@@ -996,9 +1084,11 @@ function startGame() {
   if (pick) { hostState.id = pick.value; store.set('host', pick.value); }
   hostState.on = document.getElementById('hostOn').checked; store.set('hostOn', hostState.on);
   const pact = PACT.filter(p => p.key);
+  const aiEase = Number(v('ease'));
+  store.set('ease', aiEase);
   G = CTX
-    ? C.newGame({ seed: seedStr ? Number(seedStr) : undefined, skill: v('skill'), name: CTX.master || '御主', contracts: pact.slice(0, 3).map(p => p.key), affection: pact.slice(0, 3).filter(p => p.aff >= 60).map(p => p.key), rivals: pact.map(p => p.key), staff: CTX.staff })
-    : C.newGame({ seed: seedStr ? Number(seedStr) : undefined, skill: v('skill'), contracts, affection: document.getElementById('aff').checked });
+    ? C.newGame({ seed: seedStr ? Number(seedStr) : undefined, skill: v('skill'), name: CTX.master || '御主', contracts: pact.slice(0, 3).map(p => p.key), affection: pact.slice(0, 3).filter(p => p.aff >= 60).map(p => p.key), rivals: pact.map(p => p.key), staff: CTX.staff, aiEase })
+    : C.newGame({ seed: seedStr ? Number(seedStr) : undefined, skill: v('skill'), contracts, affection: document.getElementById('aff').checked, aiEase });
   P = G.players[0];
   G.startedAt = Date.now(); G.myLog = []; G.npCount = {};
   sel = null; mode = null;
@@ -1042,7 +1132,7 @@ document.addEventListener('click', e => {
   sfxInit();
   if (SFX.ctx && SFX.ctx.state === 'suspended') SFX.ctx.resume();
   if (suppressClick) return;
-  const t = e.target.closest('[data-act],[data-shop],[data-uid],[data-disc],[data-same],[data-ce],[data-hand]');
+  const t = e.target.closest('[data-disc],[data-same]') || e.target.closest('[data-act],[data-shop],[data-uid],[data-ce],[data-hand]');
   if (!t) return;
   const act = t.dataset.act;
   if (act === 'mute') { SFX.muted = !SFX.muted; store.set('muted', SFX.muted); return render(); }
@@ -1087,7 +1177,7 @@ document.addEventListener('click', e => {
     case 'upgrade': if (result(C.upgrade(G, P), '升级')) hostSay('升级'); break;
     case 'absolute': if (result(C.useSeal(G, P, '绝对命令'), '令咒')) hostSay('令咒'); break;
     case 'useCE': {
-      const r = sel.ce !== undefined ? C.buyCE(G, P, sel.ce) : C.castCE(G, P, sel.hand);
+      const r = C.castCE(G, P, sel.hand);
       if (result(r, '礼装')) { sel = null; hostSay('礼装'); }
       break;
     }

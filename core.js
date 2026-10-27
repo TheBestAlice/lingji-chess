@@ -8,7 +8,7 @@
   const TOTAL = [8, 12, 16, 22, 30, 40];
   const COPIES = [14, 13, 12, 10, 9, 7]; // 6 人共用
   const OPEN_TRIBES = 5;
-  const SHOP_SIZE = [3, 4, 4, 5, 5, 6];
+  const SHOP_SIZE = [3, 4, 5, 5, 6, 6];
   const UP_COST = [5, 7, 8, 9, 11];
   const ODDS = [[100], [70, 30], [35, 45, 20], [20, 30, 35, 15], [15, 20, 25, 30, 10], [10, 15, 20, 25, 20, 10]];
   const BASE = ['Saber', 'Archer', 'Lancer', 'Rider', 'Caster', 'Assassin', 'Berserker'];
@@ -19,13 +19,15 @@
   const CES = DATA.ces || [];
   const CE = Object.fromEntries(CES.map(c => [c.n, c]));
   const CE_SLOTS = tier => (tier >= 4 ? 2 : 1);
-  const CE_HAND = 3;
+  // 手牌：买下的从者和礼装共用 10 格（原来的备战席和礼装栏合在一起）
+  const HAND = 10;
+  const handFree = P => HAND - P.bench.length - P.ceHand.length;
   // 电表倒转的上限
   const ABILITY_MANA_CAP = 6; // 每回合靠能力多拿的魔力
   const SELL_CAP = 3; // 送还最多返还
   const NEXT_MANA_CAP = 5; // 「下回合额外魔力」本局累计
-  // 对手 AI 的失误率：按这个概率不挑最优的从者、圣杯和站位，召唤阵也晚一回合升级
-  const AI_EASE = 0.15;
+  // 对手 AI 的失误率：按这个概率不挑最优的从者、圣杯和站位；召唤阵也晚两回合升级
+  const AI_EASE = 0.45;
   const isClass = (c, name) => !!c && c.toLowerCase() === name.toLowerCase();
   const hasKw = (key, kw) => !!CARD[key] && CARD[key].ab.includes(`【${kw}】`);
   const SKILLS = [
@@ -135,6 +137,20 @@
   }
   const npUnlocked = u => u.t >= 4 || u.gold || u.npUnlock || u.ascend === 'np';
 
+  // ===== 金卡 =====
+  // 金卡的固有能力效果翻倍：准备阶段和交战中的触发都结算两次；攻击加成按增量翻倍、第一次攻击的倍率按增量翻倍。
+  // 卡面写了金卡效果的、实现里自己按金卡算的，以及献祭类（只能献祭一次），不再翻倍
+  const GOLD_HOOKS = new Set(['deploy', 'prepEnd', 'sell', 'allyBuy', 'allyCE', 'allyDevour', 'fused', 'afterWin',
+    'start', 'death', 'kill', 'allyDeath', 'hurt', 'afterAttack', 'allyKill', 'allySummon', 'allyShield', 'allyShieldLost', 'allyNP', 'allyAttack', 'guts', 'dodge', 'absorbed']);
+  const GOLD_ONCE = new Set(['UDK－巴格斯特', '陈宫', '芦屋道满']);
+  const SELF_GOLD = Object.fromEntries(DATA.cards.map(c => {
+    const a = IMPL.ab[c.n] || {};
+    const own = GOLD_ONCE.has(c.n) || /金卡/.test(c.ab) || Object.values(a).some(f => typeof f === 'function' && /\.gold\b|g2\(/.test(String(f)));
+    return [c.n, own];
+  }));
+  const goldDoubles = u => !!u.gold && !u.summon && !SELF_GOLD[u.key];
+  const goldTimes = (u, hook) => (goldDoubles(u) && GOLD_HOOKS.has(hook) ? 2 : 1);
+
   // ===== 对局 =====
   // 对手池：第 1 席从职员里挑，其余席位从另外 5 个风格池里各挑一人，风格不重复（测试版只用卡表里有头像的人物）
   const STAFF_OPP = [{ name: '格林', style: '稳健' }, { name: '芊芊', style: '赌徒' }, { name: '藤丸立香', style: '羁绊' }];
@@ -217,7 +233,8 @@
       P.mana = Math.min(10, 2 + G.round) + (P.manaBonusNext || 0);
       P.manaBonusNext = 0;
       // 平行世界 4 名：每回合第一张礼装便宜 1 魔力
-      P.ceDiscount = (P.ceDiscountNext || 0) + (G.open.includes('平行世界') && countTribe(G, P.board, '平行世界') >= 4 ? 1 : 0); P.ceDiscountNext = 0;
+      const pw = G.open.includes('平行世界') ? countTribe(G, P.board, '平行世界') : 0;
+      P.ceDiscount = (P.ceDiscountNext || 0) + (pw >= 6 ? 99 : pw >= 4 ? 1 : 0); P.ceDiscountNext = 0;
       if (G.round > 1 && P.tier < 6) P.upCost = Math.max(0, P.upCost - 1);
       P.skillUsed = false; P.extraSlots = 0; P.freeRefresh = 0; P.scout = false; P.absolute = false;
       P.boughtThisRound = []; P.soldRomanThisRound = false; P.romeTriggers = 0;
@@ -247,7 +264,13 @@
   // ===== 准备阶段的操作 =====
   const err = msg => ({ ok: false, msg });
   const ok = (extra = {}) => ({ ok: true, ...extra });
-  const callPrep = (G, P, u, hook, ...args) => { const f = IMPL.ab[u.key] && IMPL.ab[u.key][hook]; return f ? f(api(G, P), u, ...args) : undefined; };
+  const callPrep = (G, P, u, hook, ...args) => {
+    const f = IMPL.ab[u.key] && IMPL.ab[u.key][hook];
+    if (!f) return undefined;
+    let r;
+    for (let k = goldTimes(u, hook); k > 0; k--) r = f(api(G, P), u, ...args);
+    return r;
+  };
   const callNpPrep = (G, P, u, trig) => {
     const np = IMPL.np[u.key];
     if (np && np.on === trig && npUnlocked(u)) np.run(api(G, P), u);
@@ -294,7 +317,8 @@
       const ga = Math.ceil(c.atk / 2), gh = Math.ceil(c.hp / 2);
       const tgt = to || u;
       let bonus = 0;
-      if (G.open.includes('鬼') && countTribe(G, P.board, '鬼') >= 2) bonus = 1;
+      const oni = G.open.includes('鬼') ? countTribe(G, P.board, '鬼') : 0;
+      if (oni >= 2) bonus = oni >= 6 ? 2 : 1;
       prepPerm(G, P, tgt, ga + bonus, gh + bonus);
       eaten.push(key);
       P.devoured = (P.devoured || 0) + 1;
@@ -308,8 +332,8 @@
     }
     return eaten;
   }
-  // 礼装栏：放得下才给
-  const giveCE = (P, name) => { if (P.ceHand.length >= CE_HAND) return false; P.ceHand.push(name); return true; };
+  // 手牌：放得下才给
+  const giveCE = (P, name) => { if (handFree(P) <= 0) return false; P.ceHand.push(name); return true; };
   // 天之衣：把一名非金卡友方变成金卡（不给圣杯，不重复计算永久成长，不重新触发现界）
   function gild(G, P, u) {
     if (!u || u.gold || P.gilds >= 4) return false;
@@ -358,7 +382,8 @@
       card: k => CARD[k],
     };
   }
-  const countTribe = (G, list, t) => list.filter(u => G.open.includes(t) && tribesOf(G, u).includes(t)).length;
+  // 羁绊人数：同名的只算一名
+  const countTribe = (G, list, t) => new Set(list.filter(u => G.open.includes(t) && tribesOf(G, u).includes(t)).map(u => u.key)).size;
 
   function checkTriple(G, P) {
     const all = P.board.concat(P.bench);
@@ -374,14 +399,9 @@
       gold.extraTribes = [...new Set([...a.extraTribes, ...b.extraTribes, ...c.extraTribes])];
       gold.contract = a.contract || b.contract || c.contract;
       gold.npUnlock = a.npUnlock || b.npUnlock || c.npUnlock;
-      gold.firstDeployed = a.firstDeployed || b.firstDeployed || c.firstDeployed;
       gold.ascend = [a, b, c].map(x => x.ascend).find(Boolean) || null;
-      mergeInto(P, gold, [a, b, c]);
-      // 圣杯：从比召唤阵等级高一阶的从者里选一张
-      const tier = Math.min(6, P.tier + 1);
-      const choices = [];
-      for (let i = 0; i < 3; i++) { const k = drawFromPool(G, tier); if (k) choices.push(k); }
-      if (choices.length) P.pendingDiscover = choices;
+      gold.tripleReward = true; // 放上战线时拿圣杯
+      mergeInto(G, P, gold, [a, b, c]);
       P.triples++;
       G.log.push(`[${P.name}] 三合一：${key} 成为金卡`);
       return gold;
@@ -396,22 +416,32 @@
     }
     return null;
   }
-  // 合成后的金卡放在材料原来的位置；永久成长相加，卡池份数累加
-  function mergeInto(P, gold, mats) {
+  // 圣杯：从比召唤阵等级高一阶的从者里选一张；手上已经有一份待选时排队
+  function grantDiscover(G, P) {
+    if (P.pendingDiscover) { P.discoverQueue = (P.discoverQueue || 0) + 1; return; }
+    const tier = Math.min(6, P.tier + 1);
+    const choices = [];
+    for (let i = 0; i < 3; i++) { const k = drawFromPool(G, tier); if (k) choices.push(k); }
+    if (choices.length) P.pendingDiscover = choices;
+  }
+  // 合成后的金卡回到备战席（像新买的一样，放上战线时触发【现界】和三合一奖励）；备战席满了才留在战线上材料原来的位置。
+  // 永久成长相加，卡池份数累加
+  function mergeInto(G, P, gold, mats) {
     gold.permAtk = mats.reduce((s, x) => s + x.permAtk, 0);
     gold.permHp = mats.reduce((s, x) => s + x.permHp, 0);
     gold.extraTribes = [...new Set(mats.flatMap(x => x.extraTribes))];
     gold.contract = mats.some(x => x.contract);
     gold.npUnlock = mats.some(x => x.npUnlock);
-    gold.firstDeployed = mats.some(x => x.firstDeployed);
     gold.mats = mats.flatMap(x => x.mats);
     gold.fusions = mats.reduce((s, x) => s + (x.fusions || 0), 0);
     gold.permTaunt = mats.some(x => x.permTaunt);
-    const onBoard = mats.some(x => P.board.includes(x));
-    const idx = onBoard ? P.board.findIndex(x => mats.includes(x)) : -1;
+    const idx = P.board.findIndex(x => mats.includes(x));
     P.board = P.board.filter(x => !mats.includes(x));
     P.bench = P.bench.filter(x => !mats.includes(x));
-    if (onBoard) P.board.splice(idx, 0, gold); else P.bench.push(gold);
+    if (handFree(P) > 0 || idx < 0) { P.bench.push(gold); return; }
+    P.board.splice(idx, 0, gold);
+    gold.firstDeployed = true;
+    if (gold.tripleReward) { gold.tripleReward = false; grantDiscover(G, P); }
   }
   function pickSame(G, P, i) {
     if (!P.pendingSame) return err('没有待选的同貌合成');
@@ -422,7 +452,7 @@
     const gold = makeUnit(G, chosen.key, null);
     gold.gold = true;
     gold.ascend = chosen.ascend;
-    mergeInto(P, gold, mats);
+    mergeInto(G, P, gold, mats);
     P.triples++;
     G.log.push(`[${P.name}] 同貌合成：${chosen.key} 成为金卡`);
     checkTriple(G, P);
@@ -434,7 +464,8 @@
     const key = choices[i];
     choices.forEach((k, j) => { if (j !== i) returnToPool(G, k); });
     P.pendingDiscover = null;
-    if (P.bench.length >= 8) { returnToPool(G, key); return err('备战席满了，这张放回了卡池'); }
+    if (P.discoverQueue > 0) { P.discoverQueue--; grantDiscover(G, P); }
+    if (handFree(P) <= 0) { returnToPool(G, key); return err('手牌满了，这张放回了卡池'); }
     const u = makeUnit(G, key, P);
     P.bench.push(u);
     checkTriple(G, P);
@@ -446,7 +477,7 @@
     if (!key) return err('这一格是空的');
     const cost = free ? 0 : buyCost(P);
     if (P.mana < cost) return err('魔力不够');
-    if (P.bench.length >= 8) return err('备战席满了');
+    if (handFree(P) <= 0) return err('手牌满了');
     P.mana -= cost;
     if (!free && P.discountBuys > 0) P.discountBuys--;
     P.shop[i] = null;
@@ -465,13 +496,13 @@
     if (!G.open.includes('罗马') || !tribesOf(G, u).includes('罗马')) return;
     const n = countTribe(G, P.board, '罗马');
     if (n < 2) return;
-    const max = n >= 4 ? 4 : 2;
+    const max = n >= 6 ? 6 : n >= 4 ? 4 : 2;
     if (P.romeTriggers >= max) return;
     const romans = P.board.filter(x => tribesOf(G, x).includes('罗马'));
     const t = G.rng.pick(romans);
     if (!t) return;
     P.romeTriggers++;
-    permBuff(t, 1, n >= 4 ? 2 : 1);
+    permBuff(t, n >= 6 ? 2 : 1, n >= 4 ? 2 : 1);
   }
   const buyCost = P => Math.max(0, 3 - (P.discountBuys > 0 ? 1 : 0));
   function sell(G, P, uid) {
@@ -503,6 +534,7 @@
     P.bench = P.bench.filter(x => x !== u);
     P.board.splice(pos === undefined ? P.board.length : Math.max(0, Math.min(pos, P.board.length)), 0, u);
     if (!u.firstDeployed) { u.firstDeployed = true; fireDeploy(G, P, u); }
+    if (u.tripleReward) { u.tripleReward = false; grantDiscover(G, P); }
     return ok();
   }
   // 【灵基融合】：带这个词条的机械（备战席或商店里的）拖到战线上的另一名机械身上，合并攻体和目标集中；每名机械最多接受 3 次
@@ -591,11 +623,11 @@
     applyCE(G, P, name, u);
     return ok();
   }
-  // 买下放进礼装栏，之后再用
+  // 买下放进手牌，之后再拖到目标身上用（玩家只能这样买；AI 用 buyCE 买下当场用）
   function storeCE(G, P, slot) {
     const name = P.ceShop[slot];
     if (!name) return err('这一格没有礼装');
-    if (P.ceHand.length >= CE_HAND) return err('礼装栏满了');
+    if (handFree(P) <= 0) return err('手牌满了');
     const cost = ceCost(P, name);
     if (P.mana < cost) return err('魔力不够');
     P.mana -= cost; P.ceDiscount = 0;
@@ -605,7 +637,7 @@
   }
   function castCE(G, P, idx, uid) {
     const name = P.ceHand[idx];
-    if (!name) return err('礼装栏这一格是空的');
+    if (!name) return err('手牌里没有这张礼装');
     const u = uid ? findUnit(P, uid) : null;
     const bad = checkCETarget(P, CE[name], u);
     if (bad) return err(bad);
@@ -617,8 +649,8 @@
   function ceScale(G, P, u) {
     let m = 1;
     if (!u) return { m };
-    const pw = G.open.includes('平行世界') && tribesOf(G, u).includes('平行世界') && countTribe(G, P.board, '平行世界') >= 4;
-    if (pw) m += 0.5;
+    const pw = G.open.includes('平行世界') && tribesOf(G, u).includes('平行世界') ? countTribe(G, P.board, '平行世界') : 0;
+    if (pw >= 4) m += pw >= 6 ? 1 : 0.5;
     if (u.key === '静希草十郎') m += 1;
     return { m };
   }
@@ -749,7 +781,12 @@
     const ab = (f, hook, ...args) => {
       if (f.sealed || f.summon) return undefined;
       const h = IMPL.ab[f.key] && IMPL.ab[f.key][hook];
-      return h ? h(b, f, ...args) : undefined;
+      if (!h) return undefined;
+      if (goldDoubles(f) && hook === 'attackMod') { const n = args[1], m = h(b, f, ...args); return typeof m === 'number' ? n + 2 * (m - n) : m; }
+      if (goldDoubles(f) && hook === 'firstAttack') { const r = h(b, f, ...args); return r && r.mult ? { ...r, mult: 1 + 2 * (r.mult - 1) } : r; }
+      let r;
+      for (let k = goldTimes(f, hook); k > 0; k--) r = h(b, f, ...args);
+      return r;
     };
     // ---- 给能力用的工具 ----
     Object.assign(b, {
@@ -889,7 +926,7 @@
       }
       ab(f, 'afterAttack', tgt);
       matesOf(f).forEach(m => ab(m, 'allyAttack', f, tgt));
-      if (f.tribes.has('妖精') && b.bond(f, '妖精') >= 4 && tgt.hp > 0) b.debuff(tgt, 1);
+      if (f.tribes.has('妖精') && b.bond(f, '妖精') >= 4 && tgt.hp > 0) b.debuff(tgt, b.bond(f, '妖精') >= 6 ? 2 : 1);
     }
 
     function summon(side, pos, spec) {
@@ -937,12 +974,16 @@
             if (killer.c === 'Rider' && !killer.summon && KS.bonds.Rider >= 6 && (KS.flags.riderX || 0) < 3) { KS.flags.riderX = (KS.flags.riderX || 0) + 1; b.extra.push(killer); }
             if (killer.tribes.has('新选组')) {
               const lvl = b.bond(killer, '新选组');
-              if ((lvl >= 2 && !KS.flags.shinFirst) || (lvl >= 4 && (KS.flags.shinX || 0) < 3)) {
+              if ((lvl >= 2 && !KS.flags.shinFirst) || (lvl >= 4 && (KS.flags.shinX || 0) < (lvl >= 6 ? 6 : 3))) {
                 KS.flags.shinFirst = true; KS.flags.shinX = (KS.flags.shinX || 0) + 1;
-                b.extra.push(killer); killer.counters.shinBonus = lvl >= 4 ? 2 : 0;
+                b.extra.push(killer); killer.counters.shinBonus = lvl >= 6 ? 4 : lvl >= 4 ? 2 : 0;
               }
             }
             alive(KS).filter(m => m !== killer).forEach(m => ab(m, 'allyKill', killer, d));
+            if (killer.tribes.has('鬼') && !killer.summon && b.bond(killer, '鬼') >= 4 && (killer.counters.oniKill || 0) < 2) {
+              killer.counters.oniKill = (killer.counters.oniKill || 0) + 1;
+              b.perm(killer, 1, b.bond(killer, '鬼') >= 6 ? 1 : 0);
+            }
             // 【吸收】：击杀非召唤物后永久获得它（不含本场增益的）攻体的 1/absorb（一般是四分之一），每场 1 次（樱系列 4 名、姐妹相邻各多 1 次）；击杀召唤物固定 +1/+1，不占次数
             const absorb = !killer.sealed && IMPL.ab[killer.key] && IMPL.ab[killer.key].absorb;
             if (absorb) {
@@ -953,7 +994,8 @@
               else if ((killer.counters.absorbed || 0) < uses) {
                 killer.counters.absorbed = (killer.counters.absorbed || 0) + 1;
                 const ba = d.ref ? unitAtk(d.ref) : d.atk0, bh = d.ref ? unitHp(d.ref) : d.maxHp;
-                ga = Math.ceil(ba / absorb); gh = Math.ceil(bh / absorb);
+                const div = b.bond(killer, '樱系列') >= 6 ? Math.min(absorb, 2) : absorb;
+                ga = Math.ceil(ba / div); gh = Math.ceil(bh / div);
                 frame(`${killer.name} 吸收了 ${d.name}`, { a: killer.uid });
               }
               if (ga || gh) { b.perm(killer, ga, gh); ab(killer, 'absorbed', ga, gh); }
@@ -978,7 +1020,7 @@
               if (isClass(d.c, 'AlterEgo')) summon(d.side, pos, { name: '残影', from: d.key, atk: Math.ceil(d.atk / 3), hp: Math.ceil(d.maxHp / 3) });
               if (d.c === 'Foreigner') summon(d.side, pos, { name: '眷属', atk: d.t, hp: d.t * 2, tribes: ['领域外之存在'] });
               if (d.c === 'Berserker' && S.bonds.Berserker >= 4) { const t2 = rng.pick(foesOf(d)); if (t2) hit(null, t2, d.atk, { raw: true }); }
-              if (d.tribes.has('龙') && b.bond(d, '龙') >= 2) summon(d.side, pos, { name: '龙牙兵', atk: d.t, hp: d.t * 2, tribes: ['龙'] });
+              if (d.tribes.has('龙') && b.bond(d, '龙') >= 2) { const k = b.bond(d, '龙') >= 6 ? 2 : 1; summon(d.side, pos, { name: '龙牙兵', atk: d.t * k, hp: d.t * 2 * k, tribes: ['龙'] }); }
               if (d.tribes.has('领域外之存在') && b.bond(d, '领域外之存在') >= 2) summon(d.side, pos, { name: '眷属', atk: 2, hp: 2, tribes: ['领域外之存在'] });
             }
           }
@@ -986,9 +1028,10 @@
             const lvl = b.bond(d, '机械');
             const near = alive(S).filter(u => u.tribes.has('机械'));
             const t2 = near[Math.min(pos, near.length - 1)];
-            if (t2) { b.buff(t2, lvl >= 4 ? 4 : 2, lvl >= 4 ? 4 : 2); b.shield(t2, lvl >= 4 ? 4 : 2); }
+            const k = lvl >= 6 ? 6 : lvl >= 4 ? 4 : 2;
+            if (t2) { b.buff(t2, k, k); b.shield(t2, k); }
             S.flags.mechDeaths = (S.flags.mechDeaths || 0) + 1;
-            if (lvl >= 4 && S.flags.mechDeaths === 3) summon(d.side, pos, { name: '机神装甲', atk: 10, hp: 15, taunt: true, tribes: ['机械'] });
+            if (lvl >= 4 && S.flags.mechDeaths === (lvl >= 6 ? 2 : 3)) summon(d.side, pos, lvl >= 6 ? { name: '机神装甲', atk: 15, hp: 20, taunt: true, tribes: ['机械'] } : { name: '机神装甲', atk: 10, hp: 15, taunt: true, tribes: ['机械'] });
           }
           alive(S).forEach(m => {
             ab(m, 'allyDeath', d);
@@ -1061,11 +1104,12 @@
     // ---- 羁绊 ----
     for (const S of sides) {
       const cls = {};
-      S.units.forEach(u => { if (BASE.includes(u.c)) cls[u.c] = (cls[u.c] || 0) + 1; });
+      // 同名的从者只算一名
+      S.units.forEach(u => { if (BASE.includes(u.c)) (cls[u.c] = cls[u.c] || new Set()).add(u.key); });
       const extraKinds = new Set(S.units.filter(u => isExtra(u.c)).map(u => u.c)).size;
-      BASE.forEach(c => { S.bonds[c] = cls[c] || 0; });
+      BASE.forEach(c => { S.bonds[c] = cls[c] ? cls[c].size : 0; });
       S.bonds.extra = extraKinds;
-      G.open.forEach(t => { S.bonds[t] = S.units.filter(u => u.tribes.has(t)).length; });
+      G.open.forEach(t => { S.bonds[t] = new Set(S.units.filter(u => u.tribes.has(t)).map(u => u.key)).size; });
     }
     const first = (() => {
       const r = sides.map(S => S.bonds.Rider >= 2);
@@ -1094,11 +1138,14 @@
       if (L['圆桌骑士'] >= 2) {
         const rt = us.filter(u => u.tribes.has('圆桌骑士'));
         const list = L['圆桌骑士'] >= 4 ? rt : [rt[0], rt[rt.length - 1]].filter((x, i, a) => x && a.indexOf(x) === i);
-        list.forEach(u => b.shield(u, u.t));
+        list.forEach(u => { b.shield(u, u.t * (L['圆桌骑士'] >= 6 ? 2 : 1)); if (L['圆桌骑士'] >= 6) u.guts++; });
       }
       if (L['希腊'] >= 2) {
         const hero = b.maxAtk(us.filter(u => u.tribes.has('希腊')));
-        if (hero) { hero.counters.hero = true; hero.guts++; frame(`${hero.name} 成为试炼英雄`); }
+        if (hero) {
+          hero.counters.hero = true; hero.guts++; frame(`${hero.name} 成为试炼英雄`);
+          if (L['希腊'] >= 6) b.buff(hero, hero.atk, hero.maxHp);
+        }
       }
       void lv;
     }
@@ -1111,11 +1158,12 @@
       });
       if (L['妖精'] >= 2) {
         const t2 = b.maxAtk(alive(sides[1 - S.i])); if (t2) b.debuff(t2, 3);
-        if (L['妖精'] >= 4) alive(sides[1 - S.i]).forEach(u => b.debuff(u, 1, 1));
+        if (L['妖精'] >= 4) { const k = L['妖精'] >= 6 ? 2 : 1; alive(sides[1 - S.i]).forEach(u => b.debuff(u, k, k)); }
       }
       if (L['领域外之存在'] >= 4) {
-        const t2 = b.maxAtk(us.filter(u => u.tribes.has('领域外之存在')));
-        if (t2) { b.buff(t2, Math.ceil(t2.atk * 0.5), Math.ceil(t2.maxHp * 0.5)); frame(`${t2.name} 降临`); }
+        const outer = us.filter(u => u.tribes.has('领域外之存在'));
+        const list = L['领域外之存在'] >= 6 ? outer : [b.maxAtk(outer)].filter(Boolean);
+        list.forEach(t2 => { b.buff(t2, Math.ceil(t2.atk * 0.5), Math.ceil(t2.maxHp * 0.5)); frame(`${t2.name} 降临`); });
       }
       if (S.P.skill === 'Gandr') { const t2 = b.maxAtk(alive(sides[1 - S.i])); if (t2) hit(null, t2, 3, { raw: true }); }
       // Saber脸 4 名：全体 Saber脸 的攻击变成其中最高那名的攻击
@@ -1123,6 +1171,7 @@
         const faces = us.filter(u => u.tribes.has('Saber脸'));
         const top = Math.max(...faces.map(u => u.atk));
         faces.forEach(u => { if (u.atk < top) b.buff(u, top - u.atk, 0); });
+        if (L['Saber脸'] >= 6) faces.forEach(u => { u.invul = Math.max(u.invul, 1); });
       }
     }
     frame('羁绊生效');
@@ -1194,6 +1243,8 @@
       const t = P.board.filter(u => tribesOf(G, u).includes('Saber脸')).sort((x, y) => unitAtk(x) - unitAtk(y))[0];
       if (t) prepPerm(G, P, t, 1, 1);
     }
+    // 中华 6 名：全体中华永久 +1/+1
+    if (has('中华') >= 6) P.board.filter(u => tribesOf(G, u).includes('中华')).forEach(u => prepPerm(G, P, u, 1, 1));
     // 樱系列 4 名：全体樱系列永久 +1/+1
     if (has('樱系列') >= 4) P.board.filter(u => tribesOf(G, u).includes('樱系列')).forEach(u => prepPerm(G, P, u, 1, 1));
     // MoonCancer：每回合结束，相邻从者永久 +0/+1
@@ -1202,7 +1253,7 @@
       [P.board[i - 1], P.board[i + 1]].filter(Boolean).forEach(x => permBuff(x, 0, 1));
     });
     // 龙 4 名：每回合结束，战线上的龙永久 +1/+1
-    if (countTribe(G, P.board, '龙') >= 4) P.board.filter(u => tribesOf(G, u).includes('龙')).forEach(u => permBuff(u, 1, 1));
+    if (has('龙') >= 4) { const k = has('龙') >= 6 ? 2 : 1; P.board.filter(u => tribesOf(G, u).includes('龙')).forEach(u => permBuff(u, k, k)); }
   }
   function endRound(G) {
     if (G.over) return null;
@@ -1308,7 +1359,7 @@
       if (P.pendingDiscover && slip(G, P)) { pickDiscover(G, P, Math.floor(G.rng() * P.pendingDiscover.length)); continue; }
       if (P.pendingDiscover) { pickDiscover(G, P, P.pendingDiscover.reduce((bi, k, i, a) => (shopScore(G, P, k) > shopScore(G, P, a[bi]) ? i : bi), 0)); continue; }
       if (P.pendingSame) { const mats = P.pendingSame.map(uid => findUnit(P, uid)); pickSame(G, P, mats.reduce((bi, u, i) => (u && CARD[u.key].atk + CARD[u.key].hp > CARD[mats[bi].key].atk + CARD[mats[bi].key].hp ? i : bi), 0)); continue; }
-      if (P.tier < 6 && G.round >= st.up[P.tier - 1] + (P.ease > 0 ? 1 : 0) && P.mana >= P.upCost) { upgrade(G, P); continue; }
+      if (P.tier < 6 && G.round >= st.up[P.tier - 1] + (P.ease > 0 ? 2 : 0) && P.mana >= P.upCost) { upgrade(G, P); continue; }
       // 灵基融合：有能融合的机械就融合进战线上价值最高的机械
       const mechT = P.board.filter(u => tribesOf(G, u).includes('机械')).sort((a, b) => unitValue(G, P, b) - unitValue(G, P, a))[0];
       if (mechT) {
@@ -1317,7 +1368,7 @@
         const fs = P.shop.findIndex(k => k && hasKw(k, '灵基融合'));
         if (fs >= 0 && P.mana >= buyCost(P)) { fuse(G, P, { shop: fs }, mechT.uid); continue; }
       }
-      // 礼装栏里的先用掉
+      // 手牌里的礼装先用掉
       if (P.ceHand.length && P.board.length) {
         const idx = P.ceHand.findIndex(n => !CE[n].target || aiCETarget(G, P, n));
         if (idx >= 0) { const n = P.ceHand[idx]; const t = aiCETarget(G, P, n); if (castCE(G, P, idx, t && t.uid).ok) continue; }
@@ -1325,7 +1376,7 @@
       const cands = P.shop.map((k, i) => (k ? { i, s: shopScore(G, P, k) } : null)).filter(Boolean).sort((a, b) => b.s - a.s);
       const best = cands.length && slip(G, P) ? G.rng.pick(cands) : cands[0];
       if (best && P.mana >= buyCost(P)) {
-        if (P.bench.length >= 8) {
+        if (handFree(P) <= 0) {
           const worst = P.bench.slice().sort((a, b) => unitValue(G, P, a) - unitValue(G, P, b))[0];
           if (worst && unitValue(G, P, worst) < best.s) sell(G, P, worst.uid); else break;
         }
@@ -1351,9 +1402,9 @@
   const tauntOf = u => (/目标集中/.test(CARD[u.key].ab) || u.c === 'Shielder' || u.permTaunt ? 1 : 0);
 
   const api_ = {
-    DATA, CARD, CES, CE, CE_HAND, SKILLS, TOTAL, COPIES, BASE,
+    DATA, CARD, CES, CE, HAND, handFree, SKILLS, TOTAL, COPIES, BASE,
     newGame, buy, sell, deploy, fuse, move, moveTo, refresh, toggleFreeze, upgrade, buyCE, storeCE, castCE, useSkill, useSeal, pickDiscover, pickSame, endRound, fight,
-    opponentOf, unitAtk, unitHp, tribesOf, npUnlocked, countTribe, aiPrep, makeRng, hasKw, buyCost, ceCost,
+    opponentOf, unitAtk, unitHp, tribesOf, npUnlocked, countTribe, goldDoubles, aiPrep, makeRng, hasKw, buyCost, ceCost,
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api_;
   else root.ChessCore = api_;

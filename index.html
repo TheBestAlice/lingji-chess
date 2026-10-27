@@ -155,7 +155,7 @@ h1 { font-size: 26px; margin: 0; letter-spacing: .08em; }
 .piece.target .sq { outline: 2px dashed var(--gold); outline-offset: 2px; border-radius: 8px; }
 .piece.dim, .piece.dying { opacity: .5; }
 .piece.dragging { opacity: .25; }
-.ghost { position: fixed; z-index: 60; pointer-events: none; width: var(--piece); transform: translate(-50%, -60%) scale(1.08); filter: drop-shadow(0 8px 12px #000c); }
+.piece.ghost, .cecard.ghost { position: fixed; z-index: 60; pointer-events: none; width: var(--piece); transform: translate(-50%, -60%) scale(1.08); filter: drop-shadow(0 8px 12px #000c); }
 .ins { width: 4px !important; flex: 0 0 4px !important; background: var(--cyan); border-radius: 2px; box-shadow: 0 0 8px var(--cyan); }
 .cost { position: absolute; top: -6px; right: -4px; font-size: 10px; background: var(--gold); color: #1a1405; border-radius: 6px; padding: 0 4px; font-weight: 800; z-index: 3; }
 /* 概念礼装卡：fgo.wiki 的礼装图标 + 礼装格底框 */
@@ -283,17 +283,26 @@ function play(k, v = 1) {
   const g = SFX.ctx.createGain(); g.gain.value = SFX.vol * v;
   s.connect(g); g.connect(SFX.ctx.destination); s.start();
 }
-// 语音：同一时间只放一句，新的打断旧的；返回台词文字给字幕用
+// 语音：每名从者同一时间只说一句，不同从者可以同时说。同一名从者的新台词按优先级 宝具 > 阵亡 > 登场 > 技能、攻击：
+// 正在说的比新的优先级高时新的不说，否则打断自己；技能和攻击只在这名从者没在说话时说。攻击台词有几句，随机挑一句
+const VOICE_RANK = { np: 3, death: 2, start: 1, skill: 0, attack: 0 };
+const SPEAKING = new Map(); // 从者（卡名）→ { a: 正在放的音频, kind }
+const stopVoices = () => { SPEAKING.forEach(x => x.a.pause()); SPEAKING.clear(); if (SFX.hostCur) SFX.hostCur.pause(); };
 function voice(key, kind) {
   const c = CARD[key];
-  const v = c && c.voice && c.voice[kind];
+  let v = c && c.voice && c.voice[kind];
+  if (Array.isArray(v)) v = v[Math.floor(Math.random() * v.length)];
   if (!v || SFX.muted || !SFX.voice || !SFX.vol) return null;
+  const cur = SPEAKING.get(key);
+  const busy = cur && !cur.a.paused && !cur.a.ended;
+  if (busy && (VOICE_RANK[cur.kind] ?? 1) > (VOICE_RANK[kind] ?? 1)) return null;
+  if (busy && (kind === 'skill' || kind === 'attack')) return null;
   try {
-    if (SFX.cur) { SFX.cur.pause(); }
+    if (busy) cur.a.pause();
     const a = new Audio(v.url);
     a.volume = Math.min(1, SFX.vol * 1.3);
     a.play().catch(() => {});
-    SFX.cur = a;
+    SPEAKING.set(key, { a, kind });
   } catch (e) { return null; }
   return v.text;
 }
@@ -381,7 +390,8 @@ const curHost = () => HOSTS.find(x => x.id === hostState.id && unlocked(x.id)) |
 const hostImg = hst => (hst.key && CARD[hst.key] ? CARD[hst.key].img : `${A}${hst.img}`);
 function playUrl(url) {
   if (!url || SFX.muted || !SFX.voice || !SFX.vol) return;
-  try { if (SFX.cur) SFX.cur.pause(); const a = new Audio(url); a.volume = Math.min(1, SFX.vol * 1.3); a.play().catch(() => {}); SFX.cur = a; } catch (e) { /* 播放失败就只显示台词 */ }
+  // 主持人单独一个声道，只打断自己
+  try { if (SFX.hostCur) SFX.hostCur.pause(); const a = new Audio(url); a.volume = Math.min(1, SFX.vol * 1.3); a.play().catch(() => {}); SFX.hostCur = a; } catch (e) { /* 播放失败就只显示台词 */ }
 }
 // 主持人说一句：高优先级可以打断正在说的低优先级；低优先级有冷却，刷新类按概率触发
 function hostSay(ev) {
@@ -1003,6 +1013,8 @@ function animateFrame(fr, prev, hl) {
       t.animate([{ transform: 'none', filter: 'none' }, { transform: 'translateX(-5px) rotate(-3deg)', filter: 'brightness(2.4) saturate(.4)', offset: 0.3 }, { transform: 'translateX(4px) rotate(2deg)', filter: 'brightness(1.4)', offset: 0.6 }, { transform: 'none', filter: 'none' }], { duration: 300 / spd, delay: impact });
     }
     play('挥砍', 0.7);
+    const ak = (fr.sides.flat().find(u => u.uid === hl.a) || {}).key;
+    if (ak) voice(ak, 'attack');
   }
   if (hl.np) {
     const n = pieceEl(hl.np);
@@ -1010,6 +1022,14 @@ function animateFrame(fr, prev, hl) {
     play('宝具');
     const key = (fr.sides.flat().find(u => u.uid === hl.np) || {}).key;
     voice(key, 'np');
+  }
+  // 阵亡语音；固有能力触发时的「技能」语音（每名从者每场只说一次）
+  if (hl.deadKey) voice(hl.deadKey, 'death');
+  if (hl.cue && !hl.np) {
+    replay.voiced = replay.voiced || new Set();
+    const uid = hl.cue.find(x => !replay.voiced.has(x));
+    const u = uid !== undefined && fr.sides.flat().find(x => x.uid === uid);
+    if (u && u.key) { replay.voiced.add(uid); voice(u.key, 'skill'); }
   }
   if (hl.dead) { const d = pieceEl(hl.dead); if (d) d.animate([{ opacity: 0.8, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(.6) translateY(10px)' }], { duration: 500 / spd, fill: 'forwards' }); }
   // 新登场的召唤物弹出
@@ -1137,7 +1157,7 @@ document.addEventListener('click', e => {
   const act = t.dataset.act;
   if (act === 'mute') { SFX.muted = !SFX.muted; store.set('muted', SFX.muted); return render(); }
   if (t.id === 'hostOn') return;
-  if (act === 'voice') { SFX.voice = !SFX.voice; store.set('voice', SFX.voice); if (!SFX.voice && SFX.cur) SFX.cur.pause(); return render(); }
+  if (act === 'voice') { SFX.voice = !SFX.voice; store.set('voice', SFX.voice); if (!SFX.voice) stopVoices(); return render(); }
   if (act === 'start') return startGame();
   if (act === 'report') return deliverReport(true);
   if (act === 'reportFill') return deliverReport(false);

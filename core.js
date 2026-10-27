@@ -148,6 +148,8 @@
     const own = GOLD_ONCE.has(c.n) || /金卡/.test(c.ab) || Object.values(a).some(f => typeof f === 'function' && /\.gold\b|g2\(/.test(String(f)));
     return [c.n, own];
   }));
+  // 交战中这些时机的固有能力触发时，界面播这名从者的「技能」语音（攻击加成、选目标这类被动修正不算）
+  const CUE_HOOKS = new Set(['start', 'kill', 'hurt', 'guts', 'dodge', 'allyDeath', 'allySummon', 'absorbed', 'firstAttack']);
   const goldDoubles = u => !!u.gold && !u.summon && !SELF_GOLD[u.key];
   const goldTimes = (u, hook) => (goldDoubles(u) && GOLD_HOOKS.has(hook) ? 2 : 1);
 
@@ -770,10 +772,14 @@
 
   function fight(G, A, B, opts = {}) {
     const rng = makeRng(Math.floor(G.rng() * 1e9));
-    const b = { G, rng, sides: [], frames: [], actions: 0, events: 0, aborted: '', pending: [], extra: [], extraUsed: 0 };
+    const b = { G, rng, sides: [], frames: [], actions: 0, events: 0, aborted: '', pending: [], extra: [], extraUsed: 0, cues: [] };
     const sides = [A, B].map((P, i) => ({ i, P, units: P.board.map(u => makeFighter(G, u, i, P)), ptr: 0, bonds: {}, flags: {} }));
     b.sides = sides;
-    const frame = (msg, hl) => { if (b.frames.length < 600) b.frames.push({ msg, hl: hl || null, sides: sides.map(s => s.units.filter(u => !u.dead).map(snap)) }); };
+    // cue：上一帧之后触发了固有能力的从者（界面据此播「技能」语音），挂在下一帧上
+    const frame = (msg, hl) => {
+      if (b.cues.length) { hl = { ...(hl || {}), cue: b.cues.slice() }; b.cues = []; }
+      if (b.frames.length < 600) b.frames.push({ msg, hl: hl || null, sides: sides.map(s => s.units.filter(u => !u.dead).map(snap)) });
+    };
     b.frame = frame;
     const alive = s => s.units.filter(u => !u.dead && u.hp > 0);
     const foesOf = f => alive(sides[1 - f.side]);
@@ -786,6 +792,7 @@
       if (goldDoubles(f) && hook === 'firstAttack') { const r = h(b, f, ...args); return r && r.mult ? { ...r, mult: 1 + 2 * (r.mult - 1) } : r; }
       let r;
       for (let k = goldTimes(f, hook); k > 0; k--) r = h(b, f, ...args);
+      if (CUE_HOOKS.has(hook) && !b.cues.includes(f.uid)) b.cues.push(f.uid);
       return r;
     };
     // ---- 给能力用的工具 ----
@@ -961,7 +968,7 @@
           const idx = S.units.indexOf(d);
           S.units.splice(idx, 1);
           if (idx < S.ptr) S.ptr--;
-          frame(`${d.name} 阵亡`, { dead: d.uid });
+          frame(`${d.name} 阵亡`, { dead: d.uid, deadKey: d.summon ? null : d.key });
           const killer = d.killer && !d.killer.dead && d.killer.hp > 0 ? d.killer : null;
           let suppressed = false;
           if (killer) {

@@ -1,0 +1,1111 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>灵基演算 测试版</title>
+<style>
+/* 版式：沿用自走棋通行的桌面布局——左侧御主列表；中间自上而下是召唤阵操作、商店、战线、御主栏、备战席。窄屏时御主列表移到顶部。
+   素材在 assets/；特效是纯黑底图，放在桌面这一层用滤色混合 */
+:root {
+  --bg: #0b1020; --panel: #121a33e6; --panel2: #18223f; --line: #2a3760;
+  --text: #e8ecf7; --sub: #9aa6c4; --faint: #66729a;
+  --gold: #d9b35b; --cyan: #57d2e6; --red: #e0524f; --green: #4fbf7a;
+  --piece: 84px;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; color: var(--text); font: 14px/1.5 "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; }
+body { background: var(--bg); padding: env(safe-area-inset-top, 0) max(8px, env(safe-area-inset-right, 0px)) 16px max(8px, env(safe-area-inset-left, 0px)); }
+body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: linear-gradient(#1a2440a0, #141c34c8), url(assets/bg/训练场_竖.webp) center / cover no-repeat; filter: saturate(.75); }
+@media (min-width: 720px) { body::before { background-image: linear-gradient(#1a244098, #141c34c0), url(assets/bg/训练场_横.webp); } }
+#app { max-width: 1060px; margin: 0 auto; }
+button { font: inherit; color: var(--text); background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+button:hover { border-color: var(--cyan); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.img { border: 0; border-radius: 0; background: center / 100% 100% no-repeat; padding: 8px 18px; font-weight: 700; text-shadow: 0 1px 2px #000a; min-height: 38px; }
+button.primary { background-image: url(assets/ui/按钮_主要.webp); color: #2a1a00; text-shadow: 0 1px 0 #fff6; }
+button.second { background-image: url(assets/ui/按钮_次要.webp); }
+button.danger { background-image: url(assets/ui/按钮_危险.webp); }
+button.on { box-shadow: 0 0 0 2px var(--gold); }
+button:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+h1 { font-size: 26px; margin: 0; letter-spacing: .08em; }
+.muted { color: var(--sub); }
+.row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--sub); display: inline-flex; align-items: center; gap: 3px; }
+.chip.gold { color: var(--gold); border-color: var(--gold); }
+.chip.cyan { color: var(--cyan); border-color: var(--cyan); }
+.chip img, .bond img { width: 16px; height: 16px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px; }
+.vol { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--sub); flex-wrap: wrap; }
+.vol input { width: 64px; }
+
+/* 桌面 */
+.table { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; margin-top: 8px; padding: 10px; border-radius: 16px;
+  background: radial-gradient(ellipse at 50% 40%, #34476fd9, #222f4fe6 75%); border: 2px solid #8c7438; box-shadow: 0 0 0 1px #000, inset 0 0 40px #0008; position: relative; }
+/* SVG 框（assets/ui/svg/）：之后有美术图可以直接替换同名文件 */
+.framed { border: 18px solid transparent; border-image: url(assets/ui/svg/面板框.svg) 20 fill / 18px stretch; }
+.players { display: flex; flex-direction: column; gap: 6px; margin: -4px; padding: 0; border-width: 14px; align-self: start; }
+.pl { position: relative; text-align: center; font-size: 11px; line-height: 1.25; }
+.pl .av { position: relative; width: 66px; height: 66px; margin: 0 auto; }
+.pl .av img { position: absolute; inset: 8.5%; width: 83%; height: 83%; clip-path: polygon(14% 0, 86% 0, 100% 14%, 100% 86%, 86% 100%, 14% 100%, 0 86%, 0 14%); background: #26305a; }
+.pl .av::after { content: ""; position: absolute; inset: 0; background: url(assets/ui/svg/头像框.svg) center / 100% 100% no-repeat; pointer-events: none; }
+.pl.next .av::after { background-image: url(assets/ui/svg/头像框_对手.svg); }
+.pl .av img { object-fit: cover; object-position: 50% 14%; display: block; }
+.pl.out { opacity: .35; }
+.pl .hpb { height: 5px; width: 64px; margin: 3px auto 0; background: #2a3150; border-radius: 3px; overflow: hidden; }
+.pl .hpb i { display: block; height: 100%; background: var(--green); }
+.pl .tag { position: absolute; top: -6px; right: -4px; z-index: 1; font-size: 10px; background: var(--cyan); color: #04212a; border-radius: 6px; padding: 0 4px; font-weight: 800; }
+.field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.topbar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; padding: 0 4px 10px; border-width: 14px; }
+.topbar .left { display: flex; justify-content: flex-end; }
+.topbar .right { display: flex; gap: 10px; }
+.rbtn { position: relative; width: 66px; height: 66px; border-radius: 50%; padding: 0; display: grid; place-items: center; background: url(assets/ui/svg/按钮环.svg) center / 100% 100% no-repeat; border: 0; font-size: 11px; line-height: 1.1; }
+.rbtn:hover { filter: brightness(1.15); }
+.rbtn img { width: 40px; height: 40px; }
+.rbtn .ico { font-size: 22px; line-height: 1; color: var(--cyan); }
+.rbtn .lbl { position: absolute; bottom: -16px; left: 50%; transform: translateX(-50%); white-space: nowrap; color: var(--sub); font-size: 11px; }
+.rbtn .c { position: absolute; top: -6px; left: 50%; transform: translateX(-50%); min-width: 22px; height: 22px; border-radius: 11px; background: linear-gradient(#f0d38c, #b8913a); color: #2a1a00; font-weight: 800; font-size: 12px; display: grid; place-items: center; padding: 0 5px; }
+.tierbox { text-align: center; }
+.tierbox img { width: 76px; height: 76px; display: block; margin: 0 auto; filter: drop-shadow(0 0 8px #57d2e688); }
+@media (prefers-reduced-motion: no-preference) { .tierbox img { animation: spin 40s linear infinite; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+.tierbox b { color: var(--gold); }
+.zone { position: relative; border-radius: 12px; padding: 18px 8px 10px; min-height: calc(var(--piece) * 1.22 + 20px); }
+.zone .zl { position: absolute; top: 3px; left: 10px; font-size: 11px; color: var(--faint); pointer-events: none; }
+.shopzone { background: url(assets/ui/商店底板.webp) center / 100% 100% no-repeat; padding-top: 16px; }
+.boardzone { background: url(assets/ui/战线台座.webp) center bottom / 100% 32% no-repeat; padding-bottom: 20px; }
+.benchzone { background: url(assets/ui/商店底板.webp) center / 100% 100% no-repeat; padding-top: 16px; }
+.zone.drop { box-shadow: 0 0 0 2px var(--cyan) inset; }
+.zone.sell { box-shadow: 0 0 0 2px var(--red) inset; }
+.zone.sell::after { content: "松手送还（+1 魔力）"; position: absolute; inset: 0; display: grid; place-items: center; background: #3a101899; color: #ffd0c8; font-weight: 800; border-radius: 12px; }
+.line { display: flex; justify-content: center; gap: 8px; flex-wrap: nowrap; }
+.line > * { width: var(--piece); flex: 0 0 var(--piece); }
+.benchline > * { width: calc(var(--piece) * .78); flex-basis: calc(var(--piece) * .78); }
+.hud { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; gap: 10px; align-items: center; }
+.master { display: flex; align-items: center; gap: 8px; }
+.master .face { position: relative; width: 70px; height: 70px; border-radius: 50%; border: 3px solid var(--gold); background: #0b1020 center / 80% no-repeat; box-shadow: 0 0 12px #d9b35b55; }
+.master .hpd { position: absolute; bottom: -6px; right: -6px; min-width: 30px; height: 30px; border-radius: 15px; background: radial-gradient(#d24a3a, #7a1a12); border: 2px solid #f0c08a; display: grid; place-items: center; font-weight: 900; font-size: 13px; padding: 0 4px; }
+.skill { width: 54px; height: 54px; border-radius: 50%; padding: 0; background: radial-gradient(#2b3d78, #121a33); border: 2px solid var(--cyan); font-size: 11px; line-height: 1.15; }
+.seals { display: flex; gap: 3px; }
+.seal { width: 18px; height: 26px; background: #c22b4b; clip-path: polygon(50% 0, 100% 35%, 70% 100%, 30% 100%, 0 35%); }
+.seal.used { background: #3a2530; }
+.mana { text-align: right; }
+.mana .gems { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 1px; max-width: 170px; margin-left: auto; }
+.mana .gems img { width: 16px; height: 16px; }
+.mana .gems img.off { opacity: .2; filter: grayscale(1); }
+.mana b { color: var(--cyan); font-size: 16px; }
+.bonds { display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; }
+.bond { font-size: 12px; padding: 2px 8px; border-radius: 6px; background: var(--panel2); border: 1px solid var(--line); color: var(--faint); display: inline-flex; align-items: center; gap: 4px; }
+.bond.lv { color: var(--text); border-color: var(--gold); }
+.bond small { color: var(--sub); }
+.endbtn { justify-self: end; }
+@media (max-width: 760px) {
+  :root { --piece: calc((100vw - 16px - 20px - 16px - 36px) / 7); }
+  .table { grid-template-columns: minmax(0, 1fr); padding: 8px; }
+  .players { flex-direction: row; justify-content: space-between; }
+  .pl .av { width: 46px; height: 46px; }
+  .pl .hpb { width: 46px; }
+  .players { gap: 2px; border-width: 10px; }
+  .pl { min-width: 0; flex: 1 1 0; }
+  .pl .pn { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .line { gap: 6px; }
+  .shopline { flex-wrap: wrap; }
+  .benchline > * { width: calc(var(--piece) * .9); flex-basis: calc(var(--piece) * .9); }
+  .benchline { flex-wrap: wrap; }
+  .hud { grid-template-columns: minmax(0, 1fr); }
+  .hud .master { justify-content: center; }
+  .hud .mana { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; }
+  .rbtn { width: 56px; height: 56px; }
+  .tierbox img { width: 60px; height: 60px; }
+}
+
+/* 棋子 */
+.slot { aspect-ratio: 1 / 1.22; border: 1px dashed #3a4a7a88; border-radius: 10px; min-width: 0; }
+.piece { position: relative; aspect-ratio: 1 / 1.22; cursor: grab; min-width: 0; touch-action: none; user-select: none; -webkit-user-select: none; }
+.piece .sq { position: relative; aspect-ratio: 1; }
+.piece .art { position: absolute; inset: 9%; border-radius: 6px; overflow: hidden; background: #26305a; }
+.piece .art img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 14%; display: block; pointer-events: none; }
+.piece .art .ph { width: 100%; height: 100%; display: grid; place-items: center; font-size: 12px; color: var(--sub); text-align: center; padding: 2px; }
+.piece .art.holo img { filter: grayscale(1) brightness(1.2) contrast(1.15); object-position: 50% 30%; }
+.piece .art.holo::before { content: ""; position: absolute; inset: 0; background: linear-gradient(160deg, #57d2e6, #2a6fd0); mix-blend-mode: color; }
+.piece .art.holo::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(transparent 0 2px, #57d2e62e 2px 3px); }
+.piece .frm { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.piece .frm.goldf { inset: -6%; width: 112%; height: 112%; }
+.piece .gem { position: absolute; top: -12%; left: 50%; width: 26%; transform: translateX(-50%); }
+.piece .gem img { width: 100%; display: block; }
+.piece .gem span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 10px; font-weight: 800; color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000; }
+.piece .npi { position: absolute; top: 3%; right: 3%; width: 24%; }
+.piece .pact, .piece .smn { position: absolute; top: 3%; left: 3%; width: 22%; }
+.piece .asc { position: absolute; top: 26%; right: 3%; width: 20%; }
+.piece .atk, .piece .hp { position: absolute; bottom: -7%; width: 34%; aspect-ratio: 1; display: grid; place-items: center; font-weight: 800; font-size: 12px; font-variant-numeric: tabular-nums; color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; background: center / contain no-repeat; }
+.piece .atk { left: -5%; background-image: url(assets/ui/攻击.webp); }
+.piece .hp { right: -5%; background-image: url(assets/ui/体力.webp); }
+.piece .hp.hurt { color: #ffb3a8; }
+.piece .marks { position: absolute; top: 26%; left: 0; display: flex; flex-direction: column; gap: 1px; z-index: 2; }
+.piece .marks i { font-style: normal; font-size: 9px; line-height: 12px; padding: 0 3px; border-radius: 4px; background: #0b1020cc; color: var(--cyan); }
+.piece .kw { position: absolute; bottom: -4%; left: 50%; transform: translateX(-50%); display: flex; gap: 1px; z-index: 2; }
+.piece .kw svg { width: 15px; height: 15px; display: block; background: #0b1020e6; border-radius: 50%; padding: 1.5px; border: 1px solid currentColor; }
+.lblk { font-weight: 700; padding: 0 2px; border-radius: 3px; background: #ffffff14; }
+.piece .nm { margin-top: 2px; font-size: 10px; line-height: 13px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 700; text-shadow: 0 1px 2px #000; }
+.piece.sel .sq { outline: 2px solid var(--cyan); outline-offset: 2px; border-radius: 8px; }
+.piece.target .sq { outline: 2px dashed var(--gold); outline-offset: 2px; border-radius: 8px; }
+.piece.dim, .piece.dying { opacity: .5; }
+.piece.dragging { opacity: .25; }
+.ghost { position: fixed; z-index: 60; pointer-events: none; width: var(--piece); transform: translate(-50%, -60%) scale(1.08); filter: drop-shadow(0 8px 12px #000c); }
+.ins { width: 4px !important; flex: 0 0 4px !important; background: var(--cyan); border-radius: 2px; box-shadow: 0 0 8px var(--cyan); }
+.cost { position: absolute; top: -6px; right: -4px; font-size: 10px; background: var(--gold); color: #1a1405; border-radius: 6px; padding: 0 4px; font-weight: 800; z-index: 3; }
+/* 概念礼装卡：fgo.wiki 的礼装图标 + 礼装格底框 */
+.cecard { position: relative; aspect-ratio: 1 / 1.22; cursor: grab; min-width: 0; touch-action: none; user-select: none; -webkit-user-select: none; }
+.cecard .sq { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: #2a1f45; box-shadow: 0 0 0 2px #b48cff, 0 0 10px #b48cff66; }
+.cecard .sq img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.cecard .tier { position: absolute; top: 2px; left: 2px; font-size: 9px; font-weight: 800; padding: 0 4px; border-radius: 4px; background: #0b1020cc; color: #d8c4ff; }
+.cecard .nm { margin-top: 2px; font-size: 10px; line-height: 13px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 700; color: #e4d6ff; text-shadow: 0 1px 2px #000; }
+.cecard.sel .sq { outline: 2px solid var(--cyan); outline-offset: 2px; }
+.cecard.dragging { opacity: .25; }
+.cehand { display: flex; gap: 6px; align-items: center; }
+.cehand .zl2 { font-size: 11px; color: var(--faint); writing-mode: vertical-rl; }
+.cehand .slotc { width: calc(var(--piece) * .62); aspect-ratio: 1 / 1.22; border: 1px dashed #8a6ccf88; border-radius: 8px; }
+.cehand .cecard { width: calc(var(--piece) * .62); }
+.zone.cehand-zone { min-height: 0; padding: 6px; border-radius: 10px; }
+.piece.aim .sq { outline: 3px solid #b48cff; outline-offset: 2px; border-radius: 8px; box-shadow: 0 0 14px #b48cff; }
+.piece.fuse .sq { outline: 3px solid #9fd0ff; outline-offset: 2px; border-radius: 8px; box-shadow: 0 0 14px #9fd0ff; }
+/* 主持人 */
+.host { position: relative; display: flex; align-items: center; gap: 6px; margin-right: auto; }
+.host .hav { width: 54px; height: 54px; border-radius: 50%; overflow: hidden; border: 2px solid var(--gold); background: #26305a; flex: 0 0 54px; }
+.host .hav img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 14%; }
+.host .bubble { position: absolute; left: 60px; top: 50%; transform: translateY(-50%); z-index: 20; width: max-content; max-width: min(240px, 46vw); padding: 6px 10px; border-radius: 10px; background: #fff8e8; color: #2a1a00; font-size: 12px; line-height: 1.4; box-shadow: 0 4px 14px #000a; pointer-events: none; opacity: 0; transition: opacity .2s; }
+.host .bubble.on { opacity: 1; }
+.host .bubble::before { content: ""; position: absolute; left: -6px; top: 50%; margin-top: -6px; border: 6px solid transparent; border-left: 0; border-right-color: #fff8e8; }
+.hostline { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.hostline img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; object-position: 50% 14%; border: 2px solid var(--gold); }
+.hostline span { background: #fff8e8; color: #2a1a00; border-radius: 10px; padding: 4px 10px; font-size: 13px; }
+.hostpick { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.start .hostpick label { display: flex; gap: 6px; align-items: center; margin: 0; padding: 6px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); cursor: pointer; }
+.start .hostpick label.locked { opacity: .45; cursor: not-allowed; }
+.hostpick img { width: 32px; height: 32px; border-radius: 50%; object-fit: cover; object-position: 50% 14%; }
+
+/* 特效与飘字 */
+.fx { position: absolute; pointer-events: none; mix-blend-mode: screen; background: center / contain no-repeat; z-index: 8; animation: pop var(--d, .5s) ease-out forwards; }
+.fx.seq { background-size: 400% 100%; background-position: 0 0; animation: seq var(--d, .5s) steps(3) forwards; }
+@keyframes pop { 0% { transform: scale(.55); opacity: 0; } 25% { opacity: 1; } 100% { transform: scale(1.15); opacity: 0; } }
+@keyframes seq { from { background-position: 0 0; } to { background-position: 100% 0; } }
+.dmg { position: absolute; left: 50%; top: 30%; transform: translateX(-50%); font-weight: 900; font-size: 20px; color: #fff; text-shadow: 0 0 3px #b5392a, 0 2px 2px #000; z-index: 9; pointer-events: none; animation: float var(--d, .6s) ease-out forwards; }
+.dmg.heal { color: #b9f5c9; text-shadow: 0 0 3px #2c8a4a, 0 2px 2px #000; }
+@keyframes float { from { transform: translate(-50%, 0); opacity: 1; } to { transform: translate(-50%, -28px); opacity: 0; } }
+.banner { position: absolute; left: 0; right: 0; top: 45%; transform: translateY(-50%); text-align: center; z-index: 10; pointer-events: none; }
+.banner span { display: inline-block; padding: 8px 26px; font-size: 20px; font-weight: 900; color: #fff3cf; background: linear-gradient(90deg, transparent, #6b4a10ee 20%, #6b4a10ee 80%, transparent); text-shadow: 0 0 10px #d9b35b; animation: bannerIn var(--d, .9s) ease-out forwards; }
+@keyframes bannerIn { 0% { transform: scaleX(.2); opacity: 0; } 20% { transform: scaleX(1); opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .fx, .dmg, .banner span { animation-duration: .01s; } }
+
+/* 详情浮层、提示、弹窗 */
+.detail { position: fixed; right: max(12px, env(safe-area-inset-right, 0px)); bottom: max(12px, env(safe-area-inset-bottom, 0px)); width: min(360px, calc(100vw - 24px)); max-height: 60vh; overflow: auto; z-index: 30; background: #141c38f5; border: 1px solid var(--gold); border-radius: 12px; padding: 10px 12px; box-shadow: 0 8px 30px #000c; }
+.detail h3 { margin: 0 0 4px; font-size: 16px; padding-right: 24px; }
+.detail p { margin: 4px 0; }
+.detail .lbl { color: var(--gold); font-weight: 700; margin-right: 4px; }
+.detail .x { position: absolute; top: 6px; right: 6px; padding: 0 8px; }
+.toast { position: fixed; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: #2a1f1f; border: 1px solid var(--red); padding: 6px 14px; border-radius: 8px; z-index: 70; max-width: 90vw; }
+.modal { position: fixed; inset: 0; background: #05081299; display: grid; place-items: center; z-index: 40; padding: 16px; }
+.modal .box { background: var(--panel2); border: 1px solid var(--gold); border-radius: 12px; padding: 14px; width: min(560px, 100%); max-height: 90vh; overflow: auto; }
+.disc { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.msg { min-height: 34px; padding: 6px; background: #0b1020aa; border-radius: 8px; text-align: center; font-weight: 600; }
+.msg.np { color: var(--gold); }
+.report { background: url(assets/ui/战报卡.webp) center / 100% 100% no-repeat; padding: 18px; border-radius: 10px; }
+.title { display: flex; align-items: center; gap: 10px; margin: 18px 0 4px; }
+.title img { width: 56px; height: 56px; }
+.start label { display: block; margin: 8px 0 4px; color: var(--sub); }
+.start select { width: 100%; }
+.start .row select { width: auto; flex: 1 1 140px; min-width: 0; }
+.start select, .start input[type=number] { background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 5px; font: inherit; max-width: 100%; }
+.rules li { margin: 3px 0; }
+.rank { display: flex; align-items: center; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.rank img { width: 40px; height: 40px; }
+.mode { color: var(--cyan); font-weight: 700; text-align: center; }
+/* 窄屏：主持人的气泡放到头像下面，免得挡住召唤阵 */
+@media (max-width: 760px) {
+  .host .hav { width: 40px; height: 40px; flex-basis: 40px; }
+  .host .bubble { left: 0; top: calc(100% + 8px); transform: none; max-width: 70vw; font-size: 11px; }
+  .host .bubble::before { left: 14px; top: -6px; margin-top: 0; border: 6px solid transparent; border-top: 0; border-bottom-color: #fff8e8; }
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="data.js"></script>
+<script src="cards-impl.js"></script>
+<script src="core.js"></script>
+<script>
+const C = window.ChessCore;
+const CARD = C.CARD;
+const A = 'assets/';
+const $app = document.getElementById('app');
+let G = null, P = null, sel = null, mode = null, replay = null, toastMsg = '', toastTimer = 0, showRules = false;
+
+// ---------- 酒馆联动 ----------
+// 从状态栏「模拟训练场」打开时，状态栏在页面最前面注入 window.LINGJI_CTX：
+// { master 御主名, suit 魔术礼装名, contracts: [{ name, wiki, cls, aff }]（好感高的在前）, staff: [职员名], record: 之前的战绩 }
+// 没有它时就是独立的测试版，战绩存在浏览器里。
+const CTX = window.LINGJI_CTX || null;
+const ACHV0 = { games: 0, wins: 0, best: 0, maxRefresh: 0, maxTriples: 0, champTier6: false, champDeath: false };
+if (CTX) CTX.record = { ...ACHV0, ...(CTX.record || {}) };
+// 契约英灵 → 卡表里的唯一名：按原名（fgo.wiki 页面名）或真名找，多个版本时按职阶挑；卡表外的暂时不进卡池
+// fgo.wiki 页面名可能带「(Saber)」这样的后缀，比较前去掉
+const bare = n => String(n || '').replace(/\s+/g, '').replace(/[(（][^)）]*[)）]$/, '');
+function cardOfContract(c) {
+  const names = [c.wiki, c.name].filter(Boolean).map(bare);
+  let list = C.DATA.cards.filter(x => names.includes(bare(x.wiki)) || names.includes(bare(x.n)));
+  if (list.length > 1 && c.cls) { const same = list.filter(x => x.c.toLowerCase() === String(c.cls).toLowerCase()); if (same.length) list = same; }
+  return list[0] ? list[0].n : null;
+}
+const PACT = CTX ? (CTX.contracts || []).map(c => ({ ...c, key: cardOfContract(c) })) : [];
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const store = { get(k, d) { try { const v = localStorage.getItem('lingji_' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem('lingji_' + k, JSON.stringify(v)); } catch (e) { /* 无痕模式等情况下不保存 */ } } };
+function toast(msg) { toastMsg = msg; clearTimeout(toastTimer); toastTimer = setTimeout(() => { toastMsg = ''; render(); }, 2200); render(); }
+const result = (r, okSound) => { if (!r || !r.ok) { play('错误'); toast(r ? r.msg : '操作失败'); return false; } if (okSound) play(okSound); return true; };
+
+// ---------- 音效（Web Audio）与语音（fgo.wiki 的原作语音，直接播放） ----------
+const SFX_KEYS = ['点击', '购买', '出售', '刷新', '固定', '上阵', '升级', '三合一', '选卡', '令咒', '升华', '礼装', '技能', '错误', '挥砍', '命中', '重击', '回避', '护盾', '护盾破碎', '无敌', '毅力', '召唤物', '阵亡', '宝具', '爆炸', '削弱', '回复', '眩晕', '胜利', '失败', '平局', '冠军', '出局'];
+const SFX = { vol: store.get('vol', 0.5), muted: store.get('muted', false), voice: store.get('voice', true), ctx: null, buf: {}, cur: null };
+function sfxInit() {
+  if (SFX.ctx) return;
+  try { SFX.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
+  SFX_KEYS.forEach(sfxLoad);
+}
+function sfxLoad(k) {
+  if (SFX.buf[k] !== undefined) return Promise.resolve(SFX.buf[k]);
+  SFX.buf[k] = null;
+  return fetch(`${A}sfx/${k}.mp3`).then(r => r.arrayBuffer()).then(a => new Promise((ok, no) => SFX.ctx.decodeAudioData(a, ok, no))).then(b => (SFX.buf[k] = b)).catch(() => null);
+}
+function play(k, v = 1) {
+  if (SFX.muted || !SFX.vol || !SFX.ctx) return;
+  const b = SFX.buf[k];
+  if (!b) return;
+  const s = SFX.ctx.createBufferSource(); s.buffer = b;
+  const g = SFX.ctx.createGain(); g.gain.value = SFX.vol * v;
+  s.connect(g); g.connect(SFX.ctx.destination); s.start();
+}
+// 语音：同一时间只放一句，新的打断旧的；返回台词文字给字幕用
+function voice(key, kind) {
+  const c = CARD[key];
+  const v = c && c.voice && c.voice[kind];
+  if (!v || SFX.muted || !SFX.voice || !SFX.vol) return null;
+  try {
+    if (SFX.cur) { SFX.cur.pause(); }
+    const a = new Audio(v.url);
+    a.volume = Math.min(1, SFX.vol * 1.3);
+    a.play().catch(() => {});
+    SFX.cur = a;
+  } catch (e) { return null; }
+  return v.text;
+}
+const volHTML = () => `${CTX ? '<button data-act="exit">退出演算</button>' : ''}<span class="vol"><button data-act="mute">${SFX.muted ? '音效：关' : '音效：开'}</button><button data-act="voice">${SFX.voice ? '语音：开' : '语音：关'}</button><input type="range" min="0" max="1" step="0.05" value="${SFX.vol}" data-vol aria-label="音量"></span>`;
+
+// ---------- 棋子 ----------
+const SUMMON_ART = { 龙牙兵: '敌人_龙牙兵.png', 幼龙: '敌人_幼龙.png', 眷属: '敌人_眷属.png', 青铜人偶: '敌人_青铜人偶.png', 傀儡: '敌人_傀儡.png', 蒸汽机兵: '敌人_蒸汽机兵.png', 蒸汽齿轮: '蒸汽齿轮.webp', 机神装甲: '机神装甲.webp', 向日葵: '向日葵.webp', 妖精: '妖精.webp' };
+function artOf(u) {
+  if (!u.summon) return CARD[u.key] ? CARD[u.key].img : null;
+  const from = u.from || (CARD[u.name] ? u.name : null);
+  if (from && CARD[from]) return CARD[from].img;
+  return SUMMON_ART[u.name] ? `${A}summon/${SUMMON_ART[u.name]}` : null;
+}
+// 时机关键词：卡面上的小图标和详情里的高亮
+const KW = {
+  现界: ['#57d2e6', '<circle cx="8" cy="8" r="6"/><path d="M8 3.6 9.1 6.9 12.4 8 9.1 9.1 8 12.4 6.9 9.1 3.6 8 6.9 6.9Z" fill="currentColor" stroke="none"/>'],
+  整备: ['#6fd38f', '<path d="M4 2.5h8M4 13.5h8M5 2.5c0 3.5 3 4.5 3 5.5s-3 2-3 5.5M11 2.5c0 3.5-3 4.5-3 5.5s3 2 3 5.5"/>'],
+  送还: ['#e9c46a', '<path d="M12.6 8.6A4.6 4.6 0 1 1 8 3.4M7.6 1.4 9.8 3.4 7.6 5.4"/>'],
+  归座: ['#b99bff', '<path d="M8 2.5V10M4.8 7 8 10.3 11.2 7M3 13.4h10"/>'],
+  开战: ['#ff8a6a', '<path d="M3 3l9.5 9.5M13 3l-9.5 9.5M10.4 13.6l3.2-3.2M2.4 10.4l3.2 3.2"/>'],
+  吞噬: ['#ff7b7b', '<path d="M2.5 6c2 4.5 9 4.5 11 0M4 6l1.2 2.3L6.6 6 8 8.3 9.4 6l1.4 2.3L12 6"/>'],
+  吸收: ['#f59ac8', '<path d="M8 2.5c2.6 3 4 5 4 7a4 4 0 0 1-8 0c0-2 1.4-4 4-7z"/>'],
+  同貌: ['#ffd166', '<circle cx="6" cy="8" r="3.6"/><circle cx="10" cy="8" r="3.6"/>'],
+  灵基融合: ['#9fd0ff', '<circle cx="8" cy="8" r="5.6"/><path d="M8 4.5v7M4.5 8h7"/>'],
+};
+const kwIcons = ab => {
+  const list = Object.keys(KW).filter(k => ab.includes('【' + k + '】'));
+  return list.length ? `<div class="kw">${list.map(k => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="color:${KW[k][0]}"><title>${k}</title>${KW[k][1]}</svg>`).join('')}</div>` : '';
+};
+const kwText = s => esc(s).replace(/【(.+?)】/g, (m, k) => `<span class="lblk" style="color:${(KW[k] || ['var(--gold)'])[0]}">【${k}】</span>`);
+function pieceHTML(u, opts = {}) {
+  const c = CARD[u.key];
+  const atk = u.atk ?? C.unitAtk(u), hp = u.hp ?? C.unitHp(u), maxHp = u.maxHp ?? hp;
+  const t = u.summon ? 1 : (u.t || (c ? c.t : 1));
+  const img = artOf(u);
+  const np = u.summon ? '' : (u.npOn !== undefined ? (u.npOn ? (u.npUsed ? '已发动' : '已解锁') : '未解锁') : (C.npUnlocked(u) ? '已解锁' : '未解锁'));
+  const marks = [];
+  if (u.shield) marks.push(`盾${u.shield}`);
+  if (u.invul) marks.push('无敌');
+  if (u.dodge) marks.push('回避');
+  if (u.guts) marks.push(`毅${u.guts}`);
+  if (u.taunt) marks.push('目标集中');
+  if (u.stealth) marks.push('潜伏');
+  if (u.stun) marks.push('眩晕');
+  const cls = ['piece', hp <= 0 ? 'dim' : '', opts.cls || ''].join(' ');
+  const name = u.summon ? u.name : u.key;
+  return `<div class="${cls}" data-uid="${u.uid}" ${opts.attr || ''} title="${esc(name)}">
+    <div class="sq">
+      <div class="art ${u.summon ? 'holo' : ''}">${img ? `<img src="${img}" alt="" loading="lazy" draggable="false" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ph',textContent:'${esc(name).slice(0, 4)}'}))">` : `<div class="ph">${esc(name)}</div>`}</div>
+      <img class="frm" src="${A}ui/框_${t}.webp" alt="" draggable="false">
+      ${u.gold ? `<img class="frm goldf" src="${A}ui/框_金卡.webp" alt="" draggable="false">` : ''}
+      <div class="gem"><img src="${A}ui/阶数_${t}.webp" alt="" draggable="false"><span>${u.summon ? '召' : t}</span></div>
+      ${np ? `<img class="npi" src="${A}ui/宝具_${np}.webp" alt="" draggable="false">` : ''}
+      ${u.contract ? `<img class="pact" src="${A}ui/契约.webp" alt="" draggable="false">` : ''}
+      ${u.summon ? `<img class="smn" src="${A}ui/召唤物.webp" alt="" draggable="false">` : ''}
+      ${u.ascend ? `<img class="asc" src="${A}ui/升华.webp" alt="" draggable="false">` : ''}
+      <div class="marks">${marks.map(m => `<i>${m}</i>`).join('')}</div>
+      ${u.summon || !c ? '' : kwIcons(c.ab)}
+      <div class="atk">${atk}</div><div class="hp ${hp < maxHp ? 'hurt' : ''}">${hp}</div>
+      ${opts.cost ? `<span class="cost">${opts.cost}</span>` : ''}
+    </div>
+    <div class="nm">${esc(name)}</div>
+  </div>`;
+}
+// ---------- 概念礼装卡 ----------
+const CEDATA = Object.fromEntries((C.DATA.ces || []).map(c => [c.n, c]));
+function ceCardHTML(name, opts = {}) {
+  const ce = CEDATA[name];
+  if (!ce) return '';
+  return `<div class="cecard ${opts.cls || ''}" ${opts.attr || ''} title="${esc(ce.n)}：${esc(ce.fx)}">
+    <div class="sq"><img src="${ce.img}" alt="" draggable="false" referrerpolicy="no-referrer" onerror="this.style.display='none'"><span class="tier">${ce.t} 阶</span></div>
+    ${opts.cost !== undefined ? `<span class="cost">${opts.cost}</span>` : ''}
+    <div class="nm">${esc(ce.n)}</div>
+  </div>`;
+}
+
+// ---------- 主持人（相当于酒馆老板，只负责演出）与成就 ----------
+const HOSTS = (C.DATA.hosts || { list: [] }).list, HEV = (C.DATA.hosts || {}).events || {};
+// 解锁条件：对局结束时统一判断（说明文字在 tools/hosts.cjs）
+const HOST_TEST = { davinci: () => true, waver: s => s.games >= 5, bb: s => s.maxRefresh >= 30, gil: s => s.champTier6, merlin: s => s.champDeath, qianqian: s => s.maxTriples >= 5, ritsuka: s => s.games >= 10 };
+const achv = () => (CTX ? CTX.record : { ...ACHV0, ...store.get('achv', {}) });
+const unlocked = id => HOST_TEST[id] && HOST_TEST[id](achv());
+const hostState = { on: store.get('hostOn', true), id: store.get('host', 'davinci'), text: '', until: 0, pri: -1, last: {}, timer: 0, lastAct: Date.now(), refreshes: 0 };
+const curHost = () => HOSTS.find(x => x.id === hostState.id && unlocked(x.id)) || HOSTS[0];
+const hostImg = hst => (hst.key && CARD[hst.key] ? CARD[hst.key].img : `${A}${hst.img}`);
+function playUrl(url) {
+  if (!url || SFX.muted || !SFX.voice || !SFX.vol) return;
+  try { if (SFX.cur) SFX.cur.pause(); const a = new Audio(url); a.volume = Math.min(1, SFX.vol * 1.3); a.play().catch(() => {}); SFX.cur = a; } catch (e) { /* 播放失败就只显示台词 */ }
+}
+// 主持人说一句：高优先级可以打断正在说的低优先级；低优先级有冷却，刷新类按概率触发
+function hostSay(ev) {
+  const hst = curHost();
+  if (!hostState.on || !hst || !hst.lines[ev]) return;
+  const [pri, cat] = HEV[ev] || [0, '对话'];
+  const now = Date.now();
+  if (now < hostState.until && pri <= hostState.pri) return;
+  if (pri === 0 && now - (hostState.last[ev] || 0) < 9000) return;
+  if (ev === '刷新' && Math.random() < 0.65) return;
+  hostState.last[ev] = now;
+  const lines = hst.lines[ev];
+  hostState.text = lines[Math.floor(Math.random() * lines.length)];
+  hostState.pri = pri; hostState.until = now + 3800;
+  const clips = hst.voice && hst.voice[cat];
+  if (clips && clips.length) playUrl(clips[Math.floor(Math.random() * clips.length)]);
+  hostShow();
+  clearTimeout(hostState.timer);
+  hostState.timer = setTimeout(() => { hostState.text = ''; hostState.pri = -1; hostShow(); }, 3800);
+}
+function hostShow() {
+  const b = document.querySelector('.host .bubble');
+  if (!b) return;
+  b.textContent = hostState.text;
+  b.classList.toggle('on', !!hostState.text);
+}
+const hostHTML = () => { const hst = curHost(); return hostState.on && hst ? `<div class="host" title="主持人：${esc(hst.name)}"><div class="hav"><img src="${hostImg(hst)}" alt="" referrerpolicy="no-referrer"></div><div class="bubble ${hostState.text ? 'on' : ''}">${esc(hostState.text)}</div></div>` : ''; };
+// 长时间不操作：闲置吐槽（页面在后台时不说）
+setInterval(() => {
+  if (!G || replay || G.over || document.hidden) return;
+  if (Date.now() - hostState.lastAct > 25000) { hostState.lastAct = Date.now(); hostSay('闲置'); }
+}, 5000);
+// 对局结束：记成就、解锁主持人
+function recordGame() {
+  if (!G || G.recorded) return;
+  G.recorded = true;
+  const before = HOSTS.filter(x => unlocked(x.id)).map(x => x.id);
+  const s = achv();
+  s.games++;
+  if (P.place === 1) s.wins++;
+  s.best = s.best ? Math.min(s.best, P.place || 9) : P.place || 9;
+  s.maxRefresh = Math.max(s.maxRefresh, P.refreshes || 0);
+  s.maxTriples = Math.max(s.maxTriples, P.triples || 0);
+  if (P.place === 1) {
+    if (P.tier >= 6) s.champTier6 = true;
+    const deathy = P.board.filter(u => { const c = CARD[u.key]; return /【归座】|召唤/.test(c.ab) || c.np.tr === '归座' || /召唤/.test(c.np.fx); }).length;
+    if (deathy >= 3) s.champDeath = true;
+  }
+  if (CTX) CTX.record = s; else store.set('achv', s);
+  const fresh = HOSTS.filter(x => unlocked(x.id) && !before.includes(x.id));
+  G.freshHosts = fresh.map(x => x.name);
+  if (fresh.length) setTimeout(() => toast(`解锁了新主持人：${fresh.map(x => x.name).join('、')}`), 400);
+  if (CTX) pushResult();
+}
+// 交给状态栏：先放进本地队列（状态栏不在时下次打开再处理），再请状态栏立刻写进变量
+const PENDING = 'lingji_pending';
+function gameResult() {
+  const list = G.players.slice().sort((a, b) => (a.place || 9) - (b.place || 9));
+  return {
+    id: `${G.seed}-${G.startedAt}`, at: Date.now(), place: P.place, total: G.players.length, rounds: G.round, tier: P.tier,
+    record: { ...CTX.record }, fresh: G.freshHosts || [], host: hostState.on && curHost() ? curHost().name : '',
+    open: G.open.slice(),
+    lineup: P.board.map(u => ({ name: u.key, gold: !!u.gold, t: u.t })),
+    opponents: list.filter(p => !p.human).map(p => ({ name: CARD[p.name] ? CARD[p.name].wiki : p.name, place: p.place, kind: p.rival ? '契约英灵' : STAFF.includes(p.name) ? '职员' : '演算' })),
+    np: G.npCount || {}, triples: P.triples || 0, log: G.myLog || [],
+  };
+}
+function pushResult() {
+  const r = gameResult();
+  G.result = r;
+  try { const q = JSON.parse(localStorage.getItem(PENDING) || '[]'); q.push(r); localStorage.setItem(PENDING, JSON.stringify(q.slice(-10))); } catch (e) { /* 存不了就只靠下面的直接调用 */ }
+  flushHost();
+}
+// 状态栏挂在酒馆页面上的处理函数；状态栏所在的楼层被重绘时可能已经失效，失败就留在队列里
+function flushHost() {
+  try { const f = window.parent && window.parent.__lingjiFlush; if (typeof f === 'function') return Promise.resolve(f()).catch(() => false); } catch (e) { /* 跨域或状态栏不在 */ }
+  return Promise.resolve(false);
+}
+// 战报：填进酒馆输入框，由 AI 写成剧情插曲
+function reportText() {
+  const r = G.result || gameResult();
+  const opp = r.opponents.map(o => `${o.name}（${o.kind === '演算' ? '训练场演算的电脑对手' : o.kind}，第 ${o.place || '-'} 名）`).join('、');
+  const npTop = Object.entries(r.np).sort((a, b) => b[1] - a[1])[0];
+  const lines = [
+    `【灵基演算战报】刚在模拟训练场的终端上打完一局「灵基演算」（${r.total} 人联机）：第 ${r.place} 名，打到第 ${r.rounds} 回合。`,
+    `对手：${opp}。`,
+    `我的最终阵容：${r.lineup.map(u => `${u.name}${u.gold ? '（金卡）' : ''}`).join('、') || '全灭'}；召唤阵 ${r.tier} 级${r.triples ? `，三合一 ${r.triples} 次` : ''}。`,
+    npTop ? `本局最亮眼的是 ${npTop[0]}，宝具发动了 ${npTop[1]} 次。` : '',
+    r.host ? `主持人：${r.host}。` : '',
+    r.fresh.length ? `解锁了新主持人：${r.fresh.join('、')}。` : '',
+  ];
+  return lines.filter(Boolean).join('\n');
+}
+function deliverReport(send) {
+  const text = reportText();
+  flushHost().then(() => {
+    try {
+      const doc = window.parent.document, win = window.parent;
+      const input = doc.getElementById('send_textarea');
+      if (!input) throw new Error('找不到输入框');
+      input.value = text;
+      input.dispatchEvent(new win.Event('input', { bubbles: true }));
+      const btn = doc.getElementById('send_but');
+      if (send && btn) btn.click(); else input.focus();
+      closeHost();
+    } catch (e) {
+      try { navigator.clipboard.writeText(text); toast('没找到酒馆输入框，战报已复制'); } catch (e2) { toast('没找到酒馆输入框'); }
+    }
+  });
+}
+// 关掉状态栏打开的全屏层（独立打开时没有）
+function closeHost() {
+  try { const f = window.frameElement; if (f) { (f.closest('[data-lingji]') || f).remove(); return; } } catch (e) { /* 忽略 */ }
+}
+// 新种族先用 SVG 徽记（assets/tribe/*.svg），有美术图后换成同名 webp
+const SVG_TRIBES = ['鬼', '中华', 'Saber脸', '樱系列', '平行世界'];
+const tribeIcon = t => (C.DATA.tribes[t] ? `<img src="${A}tribe/${t}.${SVG_TRIBES.includes(t) ? 'svg' : 'webp'}" alt="">` : '');
+const STAFF = ['格林', '芊芊', '藤丸立香'];
+const avatarOf = p => (p.human ? `${A}master/${(C.SKILLS.find(s => s.n === p.skill) || {}).suit || '迦勒底制服'}.png` : STAFF.includes(p.name) ? `${A}master/${p.name}.jpg` : CARD[p.name] ? CARD[p.name].img : `${A}master/格林.jpg`);
+
+// ---------- 开始页 ----------
+// 酒馆里：契约英灵直接取自变量，好感高的 3 名进卡池；卡表里的契约英灵也可能坐到对面
+function pactHTML() {
+  const inPool = PACT.filter(p => p.key).slice(0, 3);
+  const out = PACT.filter(p => !p.key);
+  return `<label>契约英灵（好感高的 3 名混进卡池并带 +1/+1，好感 ≥ 60 的买下就解锁宝具；他们也可能坐到对面和你对局）</label>
+    <div class="muted">${inPool.map(p => `<span class="chip">${esc(p.name)}${p.aff >= 60 ? ' · 宝具' : ''}</span>`).join(' ') || '没有在卡表里的契约英灵'}</div>
+    ${out.length ? `<div class="muted"><small>还没做成棋子、这次不进卡池：${out.map(p => esc(p.name)).join('、')}</small></div>` : ''}`;
+}
+function renderStart() {
+  const opts = C.DATA.cards.map(c => `<option value="${esc(c.n)}">${esc(c.n)}（${c.c} ${c.t}阶）</option>`).join('');
+  $app.innerHTML = `<div class="start">
+    <div class="title"><img src="${A}ui/标题徽记.webp" alt=""><div><h1>灵基演算</h1><div class="muted">${CTX ? `模拟训练场 · 御主 ${esc(CTX.master || '')}` : '测试版 · 模拟训练场'}</div></div></div>
+    <div class="muted">你和 5 位演算御主各自组建一排从者，最后剩下的人获胜。棋子可以拖动：从商店拖到战线是召唤，在战线里拖是换位，拖回商店是送还。</div>
+    <div class="panel" style="margin-top:12px">
+      <label for="skill">魔术礼装（每回合限用 1 次）</label>
+      <select id="skill">${C.SKILLS.map(s => `<option value="${s.n}"${CTX && CTX.suit === s.suit ? ' selected' : ''}>${s.suit} · ${s.n}：${s.fx}${s.cost ? `（${s.cost} 魔力）` : ''}</option>`).join('')}</select>
+      ${CTX ? pactHTML() : `<label>契约英灵（可选，最多 3 名，会混进卡池并带 +1/+1）</label>
+      <div class="row"><select id="c1"><option value="">无</option>${opts}</select><select id="c2"><option value="">无</option>${opts}</select><select id="c3"><option value="">无</option>${opts}</select></div>
+      <label><input type="checkbox" id="aff"> 契约英灵好感 ≥ 60（买下就解锁宝具）</label>`}
+      <label>主持人（解锁后可选；只负责演出）　<input type="checkbox" id="hostOn" ${hostState.on ? 'checked' : ''}> 显示主持人</label>
+      <div class="hostpick">${HOSTS.map(x => `<label class="${unlocked(x.id) ? '' : 'locked'}" title="${esc(x.unlock)}"><input type="radio" name="host" value="${x.id}" ${unlocked(x.id) ? '' : 'disabled'} ${curHost() === x ? 'checked' : ''}><img src="${hostImg(x)}" alt="" referrerpolicy="no-referrer"><span>${esc(x.name)}<br><small class="muted">${unlocked(x.id) ? '已解锁' : esc(x.unlock)}</small></span></label>`).join('')}</div>
+      <label for="seed">种子（留空随机；同一种子可以复现同一局）</label>
+      <input type="number" id="seed" placeholder="随机">
+      <div class="row" style="margin-top:12px"><button class="img primary" data-act="start">开始演算</button><button data-act="rules">规则速览</button>${volHTML()}</div>
+    </div>
+  </div>${showRules ? rulesModal() : ''}`;
+}
+function rulesModal() {
+  return `<div class="modal" data-act="closeRules"><div class="box" onclick="event.stopPropagation()">
+    <h3>规则速览</h3>
+    <ul class="rules">
+      <li>6 人一局，每局开放 5 个种族。每回合魔力 = 回合数 + 2（上限 10），能力给的魔力每回合最多再 +6、可以超过 10。召唤 3、送还返还 1（能力最多改到 3）、刷新 1、固定免费。</li>
+      <li>拖动：商店 → 战线或备战席是召唤；战线里左右拖是换位；拖回商店是送还。上了战线就不能退回备战席。点一下棋子看详情。</li>
+      <li>概念礼装（紫框）：商店里 1–2 格，拖到从者身上当场使用；不用指定目标的拖到战线上；拖进礼装栏（3 格）可以留着以后用。</li>
+      <li>【灵基融合】的机械：直接拖到战线上另一名机械的正中间，合并攻体，不占格子，次数不限。</li>
+      <li>【同貌】：三名同阶、不全同名的 Saber脸 也能合成金卡，由你选做成哪一名，没有圣杯。【吞噬】吃掉商店里的从者长攻体；【吸收】击杀后长攻体。</li>
+      <li>升级召唤阵能刷出更高阶的从者，每过一个回合升级费用便宜 1。</li>
+      <li>战线 7 格，从左到右轮流出手，攻击随机敌人，有目标集中的优先被打；攻击方和被攻击方互相造成伤害。</li>
+      <li>同名 3 张自动合成金卡：攻体翻倍，1–3 阶解锁宝具、4–6 阶宝具强化，并从比召唤阵等级高一阶的从者里选一张。</li>
+      <li>右上角的锁是宝具状态：灰=未解锁、蓝=可以发动、暗金=本场已发动。</li>
+      <li>职阶羁绊 2/4/6 名、种族羁绊 2/4 名；本局开放 5 个种族。</li>
+      <li>令咒 3 划：立刻召唤（免费买一张）、灵基升华（第 4 回合起）、绝对命令（本回合输了不扣血）。</li>
+      <li>输了扣「对方存活从者阶数之和 + 对方召唤阵等级」，前 4 回合最多 5、5–7 回合最多 10、之后最多 15。</li>
+      <li>青色全息的是召唤物：训练场演算出来的投影，不是从者。</li>
+      <li>从者上阵时播放原作的战斗开场语音，发动宝具时播放原作的宝具卡语音（来自 fgo.wiki）。</li>
+    </ul>
+    <h3>测试版的简化</h3>
+    <ul class="rules">${window.ChessImpl.SIMPLIFIED.map(s => `<li>${esc(s)}</li>`).join('')}<li>演算卡（卡表外的契约英灵）和中途存档还没做。</li></ul>
+    <button data-act="closeRules">关闭</button>
+  </div></div>`;
+}
+
+// ---------- 桌面：准备阶段 ----------
+function playersHTML(nextId) {
+  return `<aside class="players framed">${G.players.map(p => `<div class="pl ${p.human ? 'me' : ''} ${p.id === nextId ? 'next' : ''} ${p.alive ? '' : 'out'}" title="${esc(p.name)}">
+      ${p.id === nextId ? '<span class="tag">对手</span>' : ''}
+      <div class="av"><img src="${avatarOf(p)}" alt="" referrerpolicy="no-referrer"></div>
+      <div class="pn">${esc(p.human ? '你' : p.name.length > 5 ? p.name.slice(0, 5) + '…' : p.name)}</div>
+      <div class="muted">${p.alive ? `${Math.max(0, p.hp)} · 阵${p.tier}` : `第${p.place}名`}</div>
+      <div class="hpb"><i style="width:${Math.max(0, p.hp) / 30 * 100}%"></i></div>
+    </div>`).join('')}</aside>`;
+}
+function bondsHTML() {
+  const cls = {}, out = [];
+  P.board.forEach(u => { cls[u.c] = (cls[u.c] || 0) + 1; });
+  C.BASE.forEach(c => {
+    const n = cls[c] || 0; if (!n) return;
+    const lv = [2, 4, 6].filter(x => n >= x).pop();
+    out.push(`<span class="bond ${lv ? 'lv' : ''}">${c} ${n}<small>/${[2, 4, 6].find(x => n < x) || 6}</small></span>`);
+  });
+  const extra = new Set(P.board.filter(u => !C.BASE.includes(u.c)).map(u => u.c)).size;
+  if (extra) out.push(`<span class="bond ${extra >= 3 ? 'lv' : ''}">额外职阶 ${extra}种<small>/${extra >= 3 ? 5 : 3}</small></span>`);
+  G.open.forEach(t => {
+    const n = C.countTribe(G, P.board, t);
+    out.push(`<span class="bond ${n >= 2 ? 'lv' : ''}">${tribeIcon(t)}${t} ${n}<small>/${n >= 2 ? 4 : 2}</small></span>`);
+  });
+  return out.join('');
+}
+function selectedUnit() { return sel && sel.uid ? P.board.concat(P.bench).find(u => u.uid === sel.uid) : null; }
+function ceDetailHTML() {
+  const fromShop = sel.ce !== undefined;
+  const name = fromShop ? P.ceShop[sel.ce] : P.ceHand[sel.hand];
+  const ce = CEDATA[name];
+  if (!ce) return '';
+  const cost = C.ceCost(P, name);
+  const acts = ce.target
+    ? `<p class="muted">把它拖到一名从者身上使用${fromShop ? `（${cost} 魔力）` : ''}。</p>`
+    : `<button class="img primary" data-act="useCE">${fromShop ? `使用（${cost} 魔力）` : '使用'}</button>`;
+  return `<div class="detail">
+    <button class="x" data-act="closeSel" aria-label="关闭">×</button>
+    <h3>${esc(ce.n)} <span class="chip">${ce.t} 阶</span>${fromShop ? ` <span class="chip gold">${cost} 魔力</span>` : ' <span class="chip">礼装栏</span>'}</h3>
+    <div class="row" style="align-items:flex-start;flex-wrap:nowrap"><img src="${ce.img}" alt="" style="width:66px;border-radius:8px" referrerpolicy="no-referrer"><p style="margin:0">${esc(ce.fx)}</p></div>
+    <div class="row" style="margin-top:6px">${acts}${fromShop ? `<button data-act="storeCE" ${P.ceHand.length >= C.CE_HAND ? 'disabled' : ''}>放进礼装栏</button>` : ''}</div>
+  </div>`;
+}
+function detailHTML() {
+  if (sel && (sel.ce !== undefined || sel.hand !== undefined)) return ceDetailHTML();
+  let key = null, u = null;
+  if (sel && sel.shop !== undefined) key = P.shop[sel.shop];
+  else if ((u = selectedUnit())) key = u.key;
+  if (!key) return '';
+  const c = CARD[key];
+  const tribes = u ? C.tribesOf(G, u) : c.r;
+  const tr = KW[c.np.tr] ? `【${c.np.tr}】` : c.np.tr;
+  const npLine = c.t <= 3 ? `（金卡解锁）${tr}：${c.np.fx}` : `${tr}：${c.np.fx}${c.np.gold ? `；金卡：${c.np.gold}` : ''}`;
+  const onBoard = u && P.board.includes(u);
+  const acts = u ? `<div class="row" style="margin-top:6px">
+      ${onBoard ? '' : `<button data-act="up">上阵</button>`}
+      <button class="img danger" data-act="sell">送还</button>
+      ${P.seals > 0 && G.round >= 4 && !u.ascend ? `<button data-act="ascNp">令咒·升华宝具</button><button data-act="ascBody">令咒·升华灵基</button>` : ''}
+    </div>` : `<div class="row" style="margin-top:6px"><button class="img primary" data-act="buySel">召唤（3 魔力）</button>${P.seals > 0 ? '<button data-act="sealBuy">令咒：免费召唤</button>' : ''}</div>`;
+  return `<div class="detail">
+    <button class="x" data-act="closeSel" aria-label="关闭">×</button>
+    <h3>${esc(key)}${u && u.gold ? ' <span class="chip gold">金卡</span>' : ''}</h3>
+    <div class="row"><span class="chip">${c.c}</span><span class="chip">${c.t} 阶</span>${tribes.map(t => `<span class="chip ${G.open.includes(t) ? 'cyan' : ''}">${tribeIcon(t)}${esc(t)}</span>`).join('')}${(c.traits || []).map(t => `<span class="chip">〔${esc(t)}〕</span>`).join('')}<span class="chip">${esc(c.role)}</span></div>
+    <p><span class="lbl">攻/体</span>${u ? `${C.unitAtk(u)}/${C.unitHp(u)}` : `${c.atk}/${c.hp}`}${u && (u.permAtk || u.permHp) ? `<span class="muted">（永久成长 +${u.permAtk}/+${u.permHp}）</span>` : ''}</p>
+    <p><span class="lbl">固有能力</span>${kwText(c.ab)}</p>
+    <p><span class="lbl">宝具『${esc(c.npName || '')}』</span>${kwText(npLine)}${u ? (C.npUnlocked(u) ? ' <span class="chip gold">已解锁</span>' : ' <span class="chip">未解锁</span>') : ''}</p>
+    ${acts}
+  </div>`;
+}
+function renderPrep() {
+  const nextId = C.opponentOf(G, 0);
+  const shop = P.shop.map((k, i) => (k ? pieceHTML({ uid: 'shop' + i, key: k, t: CARD[k].t, atk: CARD[k].atk, hp: CARD[k].hp, contract: P.contracts.includes(k) }, { cls: sel && sel.shop === i ? 'sel' : '', attr: `data-shop="${i}" data-drag="shop:${i}"`, cost: C.buyCost(P) }) : '')).filter(Boolean).join('');
+  const ceHTML = P.ceShop.map((n, i) => ceCardHTML(n, { cls: sel && sel.ce === i ? 'sel' : '', attr: `data-ce="${i}" data-drag="ce:${i}"`, cost: C.ceCost(P, n) })).join('');
+  const handHTML = P.ceHand.map((n, i) => ceCardHTML(n, { cls: sel && sel.hand === i ? 'sel' : '', attr: `data-hand="${i}" data-drag="hand:${i}"` })).join('') + Array.from({ length: Math.max(0, C.CE_HAND - P.ceHand.length) }, () => '<div class="slotc"></div>').join('');
+  const board = P.board.map(u => pieceHTML(u, { cls: sel && sel.uid === u.uid ? 'sel' : (mode ? 'target' : ''), attr: `data-drag="board:${u.uid}"` })).join('') + Array.from({ length: Math.max(0, 7 - P.board.length) }, () => '<div class="slot"></div>').join('');
+  const bench = P.bench.map(u => pieceHTML(u, { cls: sel && sel.uid === u.uid ? 'sel' : (mode ? 'target' : ''), attr: `data-drag="bench:${u.uid}"` })).join('') + Array.from({ length: Math.max(0, 8 - P.bench.length) }, () => '<div class="slot"></div>').join('');
+  const sk = C.SKILLS.find(s => s.n === P.skill);
+  $app.innerHTML = `
+    <div class="row" style="justify-content:space-between;margin-top:6px"><span class="muted">第 <b style="color:var(--gold)">${G.round}</b> 回合 · 本局种族 ${G.open.map(t => `<span class="chip cyan">${tribeIcon(t)}${t}</span>`).join(' ')}</span><span class="row">${volHTML()}<button data-act="rules">规则</button></span></div>
+    <div class="table">
+      ${playersHTML(nextId)}
+      <section class="field">
+        <div class="topbar framed">
+          <div class="left">${hostHTML()}<button class="rbtn" data-act="upgrade" ${P.tier >= 6 ? 'disabled' : ''} title="升级召唤阵">${P.tier < 6 ? `<span class="c">${P.upCost}</span><img src="${A}ui/召唤阵_${P.tier + 1}.webp" alt="">` : '<span class="ico">✓</span>'}<span class="lbl">升级</span></button></div>
+          <div class="tierbox"><img src="${A}ui/召唤阵_${P.tier}.webp" alt=""><div>召唤阵 <b>${P.tier}</b> 级</div></div>
+          <div class="right">
+            <button class="rbtn" data-act="refresh" title="重新演算商店"><span class="c">${P.freeRefresh ? 0 : 1}</span><span class="ico">⟳</span><span class="lbl">刷新</span></button>
+            <button class="rbtn ${P.frozen ? 'on' : ''}" data-act="freeze" title="固定商店到下回合"><span class="c">0</span><span class="ico">${P.frozen ? '◆' : '◇'}</span><span class="lbl">${P.frozen ? '已固定' : '固定'}</span></button>
+          </div>
+        </div>
+        <div class="zone shopzone" data-zone="shop"><span class="zl">商店</span><div class="line shopline">${shop}${ceHTML}</div></div>
+        <div class="zone boardzone" data-zone="board"><span class="zl">战线 · 从左到右出手</span><div class="line boardline">${board}</div></div>
+        ${mode ? `<div class="mode">正在使用「${esc(P.skill)}」：点一名自己的从者（再点一次取消）</div>` : ''}
+        <div class="hud">
+          <div class="master">
+            <div class="face" style="background-image:url('${avatarOf(P)}')" title="${esc(sk.suit)}"><span class="hpd">${P.hp}</span></div>
+            <button class="skill ${mode === 'skill' ? 'on' : ''}" data-act="skill" ${sk.passive || P.skillUsed ? 'disabled' : ''} title="${esc(sk.suit)}：${esc(sk.fx)}">${esc(sk.n)}${sk.cost ? `<br>${sk.cost}` : ''}</button>
+            <div><div class="seals" title="令咒">${[0, 1, 2].map(i => `<i class="seal ${i < P.seals ? '' : 'used'}"></i>`).join('')}</div>
+              <button data-act="absolute" style="margin-top:4px;font-size:11px;padding:2px 6px" ${P.seals && !P.absolute ? '' : 'disabled'} title="本回合输了不扣体力">${P.absolute ? '命令中' : '绝对命令'}</button></div>
+          </div>
+          <div class="bonds">${bondsHTML()}</div>
+          <div class="zone cehand-zone" data-zone="cehand" title="礼装栏：把商店里的礼装拖进来可以留着以后用"><div class="cehand"><span class="zl2">礼装栏</span>${handHTML}</div></div>
+          <div class="mana"><div>魔力 <b style="${P.mana > 10 ? 'color:var(--gold)' : ''}">${P.mana}</b>/10${P.discountBuys ? ` <small class="muted">召唤 -1 ×${P.discountBuys}</small>` : ''}</div><div class="gems">${Array.from({ length: 10 }, (_, i) => `<img src="${A}master/魔力棱镜.png" class="${i < P.mana ? '' : 'off'}" alt="">`).join('')}</div>
+            <button class="img primary endbtn" data-act="end" style="margin-top:6px">结束准备</button></div>
+        </div>
+        <div class="zone benchzone" data-zone="bench"><span class="zl">备战席</span><div class="line benchline">${bench}</div></div>
+      </section>
+    </div>
+    ${detailHTML()}
+    ${P.pendingDiscover ? discoverModal() : P.pendingSame ? sameModal() : ''}
+    ${showRules ? rulesModal() : ''}
+    ${toastMsg ? `<div class="toast">${esc(toastMsg)}</div>` : ''}`;
+}
+function sameModal() {
+  const mats = P.pendingSame.map(uid => P.board.concat(P.bench).find(u => u.uid === uid)).filter(Boolean);
+  return `<div class="modal"><div class="box">
+    <h3>同貌合成：选一名做成金卡</h3>
+    <p class="muted">三名同阶的 Saber脸 合在一起，留下你选的那一名（没有圣杯奖励）。</p>
+    <div class="disc">${mats.map((u, i) => `<div data-same="${i}" style="cursor:pointer">${pieceHTML(u)}<div class="muted" style="font-size:12px;margin-top:4px">${esc(CARD[u.key].ab)}</div></div>`).join('')}</div>
+  </div></div>`;
+}
+function discoverModal() {
+  return `<div class="modal"><div class="box">
+    <h3>${G.round && P.triples ? '三合一完成：' : ''}从下面选一名从者</h3>
+    <div class="disc">${P.pendingDiscover.map((k, i) => `<div data-disc="${i}" style="cursor:pointer">${pieceHTML({ uid: 'd' + i, key: k, t: CARD[k].t, atk: CARD[k].atk, hp: CARD[k].hp })}<div class="muted" style="font-size:12px;margin-top:4px">${esc(CARD[k].ab)}</div></div>`).join('')}</div>
+  </div></div>`;
+}
+
+// ---------- 拖动：商店、战线、备战席之间 ----------
+let drag = null, suppressClick = false;
+document.addEventListener('pointerdown', e => {
+  if (!G || replay) return;
+  const el = e.target.closest('[data-drag]');
+  if (!el || e.button > 0) return;
+  drag = { src: el.dataset.drag, el, x: e.clientX, y: e.clientY, on: false, ghost: null };
+});
+document.addEventListener('pointermove', e => {
+  if (!drag) return;
+  if (!drag.on) {
+    if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 8) return;
+    drag.on = true;
+    drag.ghost = drag.el.cloneNode(true);
+    drag.ghost.classList.add('ghost');
+    document.body.appendChild(drag.ghost);
+    drag.el.classList.add('dragging');
+    sfxInit();
+  }
+  e.preventDefault();
+  drag.ghost.style.left = e.clientX + 'px';
+  drag.ghost.style.top = e.clientY + 'px';
+  const z = zoneAt(e.clientX, e.clientY);
+  document.querySelectorAll('.zone').forEach(n => n.classList.remove('drop', 'sell'));
+  document.querySelectorAll('.ins').forEach(n => n.remove());
+  document.querySelectorAll('.piece.aim, .piece.fuse').forEach(n => n.classList.remove('aim', 'fuse'));
+  if (!z) return;
+  const kind = drag.src.split(':')[0];
+  // 礼装：指着的从者高亮；从商店拖向礼装栏时礼装栏高亮
+  if (kind === 'ce' || kind === 'hand') {
+    if (z.dataset.zone === 'cehand' && kind === 'ce') z.classList.add('drop');
+    const pc = pieceUnder(e.clientX, e.clientY);
+    if (pc) pc.classList.add('aim'); else if (z.dataset.zone === 'board' || z.dataset.zone === 'bench') z.classList.add('drop');
+    return;
+  }
+  // 灵基融合：拖到战线上机械的正中间
+  const fz = fuseTarget(drag.src, e.clientX, e.clientY);
+  if (fz) { fz.classList.add('fuse'); return; }
+  if (z.dataset.zone === 'shop' && kind !== 'shop') z.classList.add('sell');
+  else if (z.dataset.zone !== 'shop' && !(kind === 'board' && z.dataset.zone === 'bench')) {
+    z.classList.add('drop');
+    if (z.dataset.zone === 'board') {
+      const idx = boardIndexAt(e.clientX);
+      const line = z.querySelector('.boardline');
+      const pieces = [...line.querySelectorAll('.piece:not(.dragging)')];
+      const mark = document.createElement('div'); mark.className = 'ins';
+      if (pieces[idx]) line.insertBefore(mark, pieces[idx]); else if (pieces.length) pieces[pieces.length - 1].after(mark); else line.prepend(mark);
+    }
+  }
+}, { passive: false });
+document.addEventListener('pointerup', e => {
+  if (!drag) return;
+  const d = drag; drag = null;
+  if (!d.on) return;
+  d.ghost.remove();
+  suppressClick = true; setTimeout(() => { suppressClick = false; }, 0);
+  const z = zoneAt(e.clientX, e.clientY);
+  document.querySelectorAll('.ins').forEach(n => n.remove());
+  if (!z) return render();
+  const [kind, id] = d.src.split(':');
+  const zone = z.dataset.zone;
+  const idx = zone === 'board' ? boardIndexAt(e.clientX) : 0;
+  hostState.lastAct = Date.now();
+  if (kind === 'ce' || kind === 'hand') { dropCE(kind, Number(id), zone, e.clientX, e.clientY); return render(); }
+  const fz = fuseTarget(d.src, e.clientX, e.clientY);
+  if (fz) {
+    const src = kind === 'shop' ? { shop: Number(id) } : { uid: Number(id) };
+    if (result(C.fuse(G, P, src, Number(fz.dataset.uid)), '三合一')) { sel = null; toast('灵基融合完成'); }
+    return render();
+  }
+  if (kind === 'shop') {
+    if (zone === 'shop') return render();
+    const r = C.buy(G, P, Number(id));
+    if (result(r, r && r.gold ? '三合一' : '购买')) {
+      afterBuy(r);
+      if (zone === 'board' && r.unit && P.bench.includes(r.unit) && P.board.length < 7) deployWithVoice(r.unit, idx);
+      sel = null;
+    }
+  } else {
+    const uid = Number(id);
+    const u = P.board.concat(P.bench).find(x => x.uid === uid);
+    if (!u) return render();
+    if (zone === 'shop') { if (result(C.sell(G, P, uid), '出售')) sel = null; }
+    else if (zone === 'board') {
+      if (kind === 'board') result(C.moveTo(G, P, uid, idx), '上阵'); // idx 已经不计被拖的那名
+      else deployWithVoice(u, idx);
+    } else if (zone === 'bench' && kind === 'board') { toast('上了战线就不能拿回备战席，只能送还或换位置'); play('错误'); }
+  }
+  render();
+});
+document.addEventListener('pointercancel', () => { if (drag && drag.ghost) drag.ghost.remove(); drag = null; render(); });
+// 指针下面的己方从者（战线或备战席）
+function pieceUnder(x, y) {
+  const el = document.elementsFromPoint(x, y).find(n => n.matches && n.matches('.boardline .piece[data-uid], .benchline .piece[data-uid]'));
+  return el && !el.classList.contains('dragging') ? el : null;
+}
+// 灵基融合的落点：拖的是带【灵基融合】的从者，指着战线上一名机械的中间部分
+function fuseTarget(src, x, y) {
+  const [kind, id] = src.split(':');
+  if (kind !== 'shop' && kind !== 'bench') return null;
+  const key = kind === 'shop' ? P.shop[Number(id)] : (P.bench.find(u => u.uid === Number(id)) || {}).key;
+  if (!key || !C.hasKw(key, '灵基融合')) return null;
+  const el = document.elementsFromPoint(x, y).find(n => n.matches && n.matches('.boardline .piece[data-uid]'));
+  if (!el) return null;
+  const t = P.board.find(u => u.uid === Number(el.dataset.uid));
+  if (!t || !C.tribesOf(G, t).includes('机械')) return null;
+  const r = el.getBoundingClientRect();
+  return x > r.left + r.width * 0.2 && x < r.right - r.width * 0.2 ? el : null;
+}
+function dropCE(kind, i, zone, x, y) {
+  const name = kind === 'ce' ? P.ceShop[i] : P.ceHand[i];
+  const ce = CEDATA[name];
+  if (!ce) return;
+  if (kind === 'ce' && zone === 'cehand') { if (result(C.storeCE(G, P, i), '礼装')) sel = null; return; }
+  const pc = pieceUnder(x, y);
+  let r;
+  if (ce.target) {
+    if (!pc) { play('错误'); toast('把礼装拖到一名从者身上'); return; }
+    const uid = Number(pc.dataset.uid);
+    r = kind === 'ce' ? C.buyCE(G, P, i, uid) : C.castCE(G, P, i, uid);
+  } else {
+    if (zone !== 'board' && zone !== 'bench') return;
+    r = kind === 'ce' ? C.buyCE(G, P, i) : C.castCE(G, P, i);
+  }
+  if (result(r, '礼装')) { sel = null; hostSay('礼装'); }
+}
+// 买下之后：主持人对三合一、高阶从者说话
+function afterBuy(r) {
+  if (r.gold) hostSay('三合一');
+  else if (r.unit && CARD[r.unit.key].t >= 5) hostSay('高阶');
+}
+function zoneAt(x, y) {
+  for (const z of document.querySelectorAll('.zone')) { const r = z.getBoundingClientRect(); if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return z; }
+  return null;
+}
+function boardIndexAt(x) {
+  const pieces = [...document.querySelectorAll('.boardline .piece:not(.dragging)')];
+  let i = 0;
+  for (const p of pieces) { const r = p.getBoundingClientRect(); if (x > r.left + r.width / 2) i++; }
+  return i;
+}
+// 上阵：放到战线并播放登场语音
+function deployWithVoice(u, idx) {
+  const eaten = P.devoured || 0;
+  const r = C.deploy(G, P, u.uid, idx);
+  if (!result(r, '上阵')) return false;
+  voice(u.key, 'start');
+  if ((P.devoured || 0) > eaten) hostSay('吞噬');
+  return true;
+}
+
+// ---------- 交战回放：撞击、受击、特效、飘字、语音 ----------
+function frameFx(prev, cur) {
+  const fx = {}, sounds = new Set(), nums = {};
+  const add = (uid, k) => { (fx[uid] = fx[uid] || []).push(k); };
+  const hl = cur.hl || {};
+  const before = new Map((prev ? prev.sides.flat() : []).map(u => [u.uid, u]));
+  const hurt = [];
+  cur.sides.flat().forEach(u => {
+    const p = before.get(u.uid);
+    if (!p) { if (prev) { add(u.uid, '召唤'); sounds.add('召唤物'); } return; }
+    if (u.hp < p.hp) { hurt.push(u.uid); nums[u.uid] = { n: u.hp - p.hp }; }
+    if (u.hp > p.hp) { add(u.uid, '回复'); nums[u.uid] = { n: u.hp - p.hp, heal: true }; sounds.add('回复'); }
+    if (u.shield > p.shield) { add(u.uid, '护盾'); sounds.add('护盾'); }
+    if (p.shield > 0 && u.shield === 0) { add(u.uid, '护盾破碎_序列'); sounds.add('护盾破碎'); }
+    if (u.invul < p.invul) { add(u.uid, '无敌'); sounds.add('无敌'); }
+    if (u.guts < p.guts) { add(u.uid, '毅力'); sounds.add('毅力'); }
+    if (u.atk < p.atk && u.hp > 0) { add(u.uid, '削弱'); sounds.add('削弱'); }
+    if (u.stun > p.stun) { add(u.uid, '眩晕'); sounds.add('眩晕'); }
+  });
+  const aoe = hurt.length >= 3;
+  hurt.forEach(uid => add(uid, aoe ? '爆炸_序列' : '冲击'));
+  if (hurt.length) sounds.add(aoe ? '爆炸' : '命中');
+  if (hl.t && hl.a) add(hl.t, '斩击_序列');
+  if (hl.np) add(hl.np, '宝具光_序列');
+  if (hl.dead) { add(hl.dead, '消散_序列'); sounds.add('阵亡'); }
+  if (/回避/.test(cur.msg)) sounds.add('回避');
+  return { fx, sounds: [...sounds].slice(0, 3), nums };
+}
+function renderBattle() {
+  const i = Math.min(replay.idx, replay.frames.length - 1);
+  const fr = replay.frames[i], prev = replay.frames[i - 1];
+  const me = replay.side, foe = 1 - me;
+  const hl = fr.hl || {};
+  // 阵亡的单位在这一帧已经移除：从上一帧补回原位，播消散
+  const sideList = s => {
+    const list = fr.sides[s].slice();
+    if (hl.dead && prev && !list.some(u => u.uid === hl.dead)) {
+      const pi = prev.sides[s].findIndex(u => u.uid === hl.dead);
+      if (pi >= 0) list.splice(Math.min(pi, list.length), 0, { ...prev.sides[s][pi], hp: 0, dying: true });
+    }
+    return list;
+  };
+  const line = list => list.map(u => pieceHTML(u, { cls: [u.uid === hl.np ? 'nphl' : '', u.dying ? 'dying' : ''].join(' ') })).join('') + Array.from({ length: Math.max(0, 7 - list.length) }, () => '<div class="slot"></div>').join('');
+  const done = replay.idx >= replay.frames.length - 1;
+  const np = /发动宝具/.test(fr.msg);
+  const npName = np ? (fr.msg.match(/『(.+)』/) || [])[1] : '';
+  $app.innerHTML = `
+    <div class="row" style="justify-content:space-between;margin-top:6px"><span class="muted">第 <b style="color:var(--gold)">${replay.round}</b> 回合交战 · ${esc(replay.names[me])} 对 ${esc(replay.names[foe])}</span>
+      <span class="row">${[1, 2, 4].map(s => `<button data-act="speed" data-s="${s}" class="${replay.speed === s ? 'on' : ''}">${s}×</button>`).join('')}<button data-act="skip">跳过</button>${volHTML()}</span></div>
+    <div class="table battle">
+      ${playersHTML(replay.oppId)}
+      <section class="field">
+        <div class="zone boardzone"><span class="zl">${esc(replay.names[foe])}</span><div class="line">${line(sideList(foe))}</div></div>
+        <div class="msg ${np ? 'np' : ''}">${esc(fr.msg)}</div>
+        <div class="zone boardzone"><span class="zl">${esc(replay.names[me])}（你）</span><div class="line">${line(sideList(me))}</div></div>
+        ${done ? `<div class="report">${hostState.on && hostState.text && curHost() ? `<div class="hostline"><img src="${hostImg(curHost())}" alt="" referrerpolicy="no-referrer"><span>${esc(hostState.text)}</span></div>` : ''}${replay.summary}<div class="row" style="margin-top:8px"><button class="img primary" data-act="continue">${G.over ? '查看结果' : '进入下一回合'}</button></div></div>` : ''}
+      </section>
+      ${np && !replay.skipping ? `<div class="banner"><span style="--d:${(1.1 / replay.speed).toFixed(2)}s">『${esc(npName)}』</span></div>` : ''}
+    </div>`;
+  if (replay.skipping) return;
+  animateFrame(fr, prev, hl);
+}
+function animateFrame(fr, prev, hl) {
+  const host = $app.querySelector('.battle');
+  const spd = replay.speed;
+  const pieceEl = uid => host.querySelector(`.piece[data-uid="${uid}"]`);
+  const { fx, sounds, nums } = frameFx(prev, fr);
+  const isAttack = hl.a && hl.t && /攻击/.test(fr.msg);
+  const impact = isAttack ? Math.round(200 / spd) : 0;
+  // 撞击：攻击者冲向目标再弹回，目标在撞上的那一刻闪白、抖动
+  if (isAttack) {
+    const a = pieceEl(hl.a), t = pieceEl(hl.t);
+    if (a && t) {
+      const ra = a.getBoundingClientRect(), rt = t.getBoundingClientRect();
+      const dx = (rt.left - ra.left) * 0.82, dy = (rt.top - ra.top) * 0.82;
+      a.style.zIndex = 7;
+      a.animate([{ transform: 'translate(0,0) scale(1)' }, { transform: `translate(${dx * 0.15}px,${dy * 0.15 - 6}px) scale(1.1)`, offset: 0.25 }, { transform: `translate(${dx}px,${dy}px) scale(1.06)`, offset: 0.5 }, { transform: 'translate(0,0) scale(1)' }], { duration: 420 / spd, easing: 'ease-in-out' });
+      t.animate([{ transform: 'none', filter: 'none' }, { transform: 'translateX(-5px) rotate(-3deg)', filter: 'brightness(2.4) saturate(.4)', offset: 0.3 }, { transform: 'translateX(4px) rotate(2deg)', filter: 'brightness(1.4)', offset: 0.6 }, { transform: 'none', filter: 'none' }], { duration: 300 / spd, delay: impact });
+    }
+    play('挥砍', 0.7);
+  }
+  if (hl.np) {
+    const n = pieceEl(hl.np);
+    if (n) n.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.22) translateY(-8px)', offset: 0.4 }, { transform: 'scale(1)' }], { duration: 700 / spd, easing: 'ease-out' });
+    play('宝具');
+    const key = (fr.sides.flat().find(u => u.uid === hl.np) || {}).key;
+    voice(key, 'np');
+  }
+  if (hl.dead) { const d = pieceEl(hl.dead); if (d) d.animate([{ opacity: 0.8, transform: 'scale(1)' }, { opacity: 0, transform: 'scale(.6) translateY(10px)' }], { duration: 500 / spd, fill: 'forwards' }); }
+  // 新登场的召唤物弹出
+  Object.entries(fx).forEach(([uid, list]) => { if (list.includes('召唤')) { const el = pieceEl(uid); if (el) el.animate([{ transform: 'scale(0)', opacity: 0 }, { transform: 'scale(1.15)', opacity: 1, offset: 0.6 }, { transform: 'scale(1)' }], { duration: 400 / spd }); } });
+  // 特效与飘字在撞上的那一刻出现；特效挂在桌面这一层，用滤色去掉黑底
+  setTimeout(() => {
+    if (!replay || !host.isConnected) return;
+    const hb = host.getBoundingClientRect();
+    const dur = `${(0.55 / spd).toFixed(2)}s`;
+    for (const [uid, list] of Object.entries(fx)) {
+      const el = pieceEl(uid);
+      if (!el) continue;
+      const r = el.querySelector('.sq').getBoundingClientRect();
+      const s = r.width * 1.7;
+      list.slice(-2).forEach(k => {
+        const d = document.createElement('div');
+        d.className = 'fx' + (k.endsWith('_序列') ? ' seq' : '');
+        Object.assign(d.style, { left: `${r.left - hb.left + r.width / 2 - s / 2}px`, top: `${r.top - hb.top + r.height / 2 - s / 2}px`, width: `${s}px`, height: `${s}px`, backgroundImage: `url(${A}fx/${k}.webp)` });
+        d.style.setProperty('--d', dur);
+        host.appendChild(d);
+      });
+    }
+    for (const [uid, v] of Object.entries(nums)) {
+      const el = pieceEl(uid);
+      if (!el) continue;
+      const d = document.createElement('div');
+      d.className = 'dmg' + (v.heal ? ' heal' : '');
+      d.textContent = v.heal ? `+${v.n}` : v.n;
+      d.style.setProperty('--d', `${(0.75 / spd).toFixed(2)}s`);
+      el.querySelector('.sq').appendChild(d);
+    }
+    if (spd < 4 || replay.idx % 2 === 0) sounds.forEach((k, j) => setTimeout(() => play(k), j * 40));
+  }, impact);
+}
+function battleEndHost() {
+  const ev = { 冠军: '夺冠', 出局: '出局', 胜利: '胜利', 失败: '失败' }[replay.endSound];
+  if (ev) { hostSay(ev); renderBattle(); }
+}
+function stepReplay() {
+  if (!replay) return;
+  if (replay.idx < replay.frames.length - 1) {
+    replay.idx++;
+    renderBattle();
+    const fr = replay.frames[replay.idx];
+    const base = /宝具/.test(fr.msg) ? 1250 : fr.hl ? 620 : 320;
+    if (replay.idx >= replay.frames.length - 1) { play(replay.endSound); battleEndHost(); }
+    else replay.timer = setTimeout(stepReplay, base / replay.speed);
+  }
+}
+function renderOver() {
+  const list = G.players.slice().sort((a, b) => (a.place || 9) - (b.place || 9));
+  $app.innerHTML = `<div class="title"><img src="${A}ui/标题徽记.webp" alt=""><h1>演算结束</h1></div><div class="panel">
+    ${list.map(p => `<div class="rank">${p.place && p.place <= 4 ? `<img src="${A}ui/名次_${p.place}.webp" alt="第 ${p.place} 名">` : ''}<span style="flex:1">第 ${p.place || '-'} 名 · ${esc(p.name)}${p.human ? '（你）' : ''}</span><span class="muted">体力 ${Math.max(0, p.hp)}</span></div>`).join('')}
+    <p class="muted">种子 ${G.seed}，开放种族：${G.open.join('、')}</p>
+    ${CTX ? `<pre class="muted" style="white-space:pre-wrap;font:inherit">${esc(reportText())}</pre>` : ''}
+    <div class="row">${CTX ? '<button class="img primary" data-act="report">发送战报</button><button data-act="reportFill">填进输入框</button>' : ''}<button class="${CTX ? '' : 'img primary'}" data-act="restart">再来一局</button></div></div>`;
+}
+
+function render() {
+  if (!G) return renderStart();
+  if (replay) return renderBattle();
+  if (G.over) return renderOver();
+  renderPrep();
+}
+
+// ---------- 操作 ----------
+function startGame() {
+  const v = id => document.getElementById(id).value;
+  const contracts = CTX ? [] : ['c1', 'c2', 'c3'].map(v).filter(Boolean);
+  const seedStr = v('seed');
+  const pick = document.querySelector('input[name=host]:checked');
+  if (pick) { hostState.id = pick.value; store.set('host', pick.value); }
+  hostState.on = document.getElementById('hostOn').checked; store.set('hostOn', hostState.on);
+  const pact = PACT.filter(p => p.key);
+  G = CTX
+    ? C.newGame({ seed: seedStr ? Number(seedStr) : undefined, skill: v('skill'), name: CTX.master || '御主', contracts: pact.slice(0, 3).map(p => p.key), affection: pact.slice(0, 3).filter(p => p.aff >= 60).map(p => p.key), rivals: pact.map(p => p.key), staff: CTX.staff })
+    : C.newGame({ seed: seedStr ? Number(seedStr) : undefined, skill: v('skill'), contracts, affection: document.getElementById('aff').checked });
+  P = G.players[0];
+  G.startedAt = Date.now(); G.myLog = []; G.npCount = {};
+  sel = null; mode = null;
+  play('选卡');
+  render();
+  hostSay('开局');
+}
+function endPrep() {
+  if (P.pendingDiscover) return toast('先选一张圣杯奖励');
+  if (P.pendingSame) return toast('先选同貌合成的结果');
+  if (P.mana >= 3) hostSay('剩魔力');
+  const round = G.round;
+  const names = G.players.map(p => p.name);
+  const results = C.endRound(G);
+  const mine = results.find(r => r.a === 0 || r.b === 0);
+  sel = null; mode = null;
+  if (!mine || !mine.frames) { render(); return; }
+  const side = mine.a === 0 ? 0 : 1;
+  const oppId = side === 0 ? mine.b : mine.a;
+  const oppName = oppId === 'ghost' ? (G.ghost ? G.ghost.name : '残影') : names[oppId];
+  const won = mine.winner === side, draw = mine.winner === null;
+  const lr = P.lastResult || {};
+  const summary = draw ? '平局，双方都不扣体力。' : won ? `你赢了，${esc(oppName)} 扣 ${mine.dmg} 点体力。` : `你输了，扣 ${lr.dmg || 0} 点体力。`;
+  const others = results.filter(r => r !== mine && r.frames).map(r => `${names[r.a]} ${r.winner === 0 ? '胜' : r.winner === 1 ? '负' : '平'} ${r.b === 'ghost' ? '残影' : names[r.b]}`).join('；');
+  const endSound = G.over ? (P.place === 1 ? '冠军' : '出局') : draw ? '平局' : won ? '胜利' : (P.alive ? '失败' : '出局');
+  if (G.myLog) G.myLog.push({ round, opp: oppName, res: draw ? '平' : won ? '胜' : '负' });
+  const mineKeys = new Set(P.board.map(u => u.key));
+  if (G.npCount) mine.frames.forEach(f => { const m = /^(.+?) 发动宝具/.exec(f.msg); if (m && mineKeys.has(m[1])) G.npCount[m[1]] = (G.npCount[m[1]] || 0) + 1; });
+  const names2 = []; names2[side] = names[0]; names2[1 - side] = oppName;
+  replay = { frames: mine.frames, idx: 0, side, oppId, speed: store.get('speed', 1), round, names: names2, endSound,
+    summary: `<b>${summary}</b>${mine.aborted ? `（${esc(mine.aborted)}）` : ''}<div class="muted">其他对局：${esc(others || '无')}</div>` };
+  renderBattle();
+  replay.timer = setTimeout(stepReplay, 600);
+}
+
+document.addEventListener('input', e => {
+  if (e.target.matches('[data-vol]')) { SFX.vol = Number(e.target.value); store.set('vol', SFX.vol); }
+});
+document.addEventListener('change', e => { if (e.target.matches('[data-vol]')) { sfxInit(); play('点击'); } });
+document.addEventListener('click', e => {
+  sfxInit();
+  if (SFX.ctx && SFX.ctx.state === 'suspended') SFX.ctx.resume();
+  if (suppressClick) return;
+  const t = e.target.closest('[data-act],[data-shop],[data-uid],[data-disc],[data-same],[data-ce],[data-hand]');
+  if (!t) return;
+  const act = t.dataset.act;
+  if (act === 'mute') { SFX.muted = !SFX.muted; store.set('muted', SFX.muted); return render(); }
+  if (t.id === 'hostOn') return;
+  if (act === 'voice') { SFX.voice = !SFX.voice; store.set('voice', SFX.voice); if (!SFX.voice && SFX.cur) SFX.cur.pause(); return render(); }
+  if (act === 'start') return startGame();
+  if (act === 'report') return deliverReport(true);
+  if (act === 'reportFill') return deliverReport(false);
+  if (act === 'exit') { if (G && !G.over && !confirm('退出后这局不会保存，确定退出吗？')) return; return closeHost(); }
+  if (act === 'rules') { showRules = true; return render(); }
+  if (act === 'closeRules') { showRules = false; return render(); }
+  if (act === 'restart') { G = null; replay = null; return render(); }
+  if (act === 'speed') { replay.speed = Number(t.dataset.s); store.set('speed', replay.speed); return renderBattle(); }
+  if (act === 'skip') { clearTimeout(replay.timer); replay.idx = replay.frames.length - 1; replay.skipping = true; renderBattle(); replay.skipping = false; play(replay.endSound); battleEndHost(); return; }
+  if (act === 'continue') {
+    clearTimeout(replay.timer); replay = null; play('点击');
+    if (G.over) recordGame();
+    render();
+    if (!G.over && P.hp < 10 && !G.lowHpSaid) { G.lowHpSaid = true; hostSay('体力低'); }
+    hostState.refreshes = 0;
+    return;
+  }
+  if (!G || replay) return;
+  hostState.lastAct = Date.now();
+  if (t.dataset.disc !== undefined) { result(C.pickDiscover(G, P, Number(t.dataset.disc)), '选卡'); return render(); }
+  if (t.dataset.same !== undefined) { if (result(C.pickSame(G, P, Number(t.dataset.same)), '三合一')) hostSay('同貌'); return render(); }
+  if (t.dataset.ce !== undefined && !act) { sel = { ce: Number(t.dataset.ce) }; mode = null; play('点击'); return render(); }
+  if (t.dataset.hand !== undefined && !act) { sel = { hand: Number(t.dataset.hand) }; mode = null; play('点击'); return render(); }
+  if (t.dataset.shop !== undefined && !act) { sel = { shop: Number(t.dataset.shop) }; mode = null; play('点击'); return render(); }
+  if (t.dataset.uid && !act) {
+    const uid = Number(t.dataset.uid);
+    if (mode === 'skill') { if (result(C.useSkill(G, P, uid), '技能')) mode = null; return render(); }
+    sel = sel && sel.uid === uid ? null : { uid }; play('点击'); return render();
+  }
+  const u = selectedUnit();
+  switch (act) {
+    case 'closeSel': sel = null; break;
+    case 'buySel': { const r = C.buy(G, P, sel.shop); if (result(r, r && r.gold ? '三合一' : '购买')) { sel = null; afterBuy(r); if (r.unit && P.bench.includes(r.unit) && P.board.length < 7) deployWithVoice(r.unit); } break; }
+    case 'sealBuy': if (result(C.useSeal(G, P, '立刻召唤', sel.shop), '令咒')) { sel = null; hostSay('令咒'); const nu = P.bench[P.bench.length - 1]; if (nu && P.board.length < 7) deployWithVoice(nu); } break;
+    case 'refresh': if (result(C.refresh(G, P), '刷新')) { hostState.refreshes++; hostSay(hostState.refreshes >= 4 ? '连刷' : '刷新'); } sel = null; break;
+    case 'freeze': C.toggleFreeze(G, P); play('固定'); if (P.frozen) hostSay('固定'); break;
+    case 'upgrade': if (result(C.upgrade(G, P), '升级')) hostSay('升级'); break;
+    case 'absolute': if (result(C.useSeal(G, P, '绝对命令'), '令咒')) hostSay('令咒'); break;
+    case 'useCE': {
+      const r = sel.ce !== undefined ? C.buyCE(G, P, sel.ce) : C.castCE(G, P, sel.hand);
+      if (result(r, '礼装')) { sel = null; hostSay('礼装'); }
+      break;
+    }
+    case 'storeCE': if (result(C.storeCE(G, P, sel.ce), '礼装')) sel = null; break;
+    case 'skill': {
+      const sk = C.SKILLS.find(s => s.n === P.skill);
+      if (!sk.target) { result(C.useSkill(G, P), '技能'); break; }
+      mode = mode === 'skill' ? null : 'skill'; play('点击'); break;
+    }
+    case 'up': if (u) deployWithVoice(u); break;
+    case 'sell': if (u && result(C.sell(G, P, u.uid), '出售')) sel = null; break;
+    case 'ascNp': if (u) { if (result(C.useSeal(G, P, '灵基升华', { uid: u.uid, route: 'np' }), '令咒')) { play('升华'); hostSay('升华'); } } break;
+    case 'ascBody': if (u) { if (result(C.useSeal(G, P, '灵基升华', { uid: u.uid, route: 'body' }), '令咒')) { play('升华'); hostSay('升华'); } } break;
+    case 'end': return endPrep();
+  }
+  render();
+});
+render();
+</script>
+</body>
+</html>
